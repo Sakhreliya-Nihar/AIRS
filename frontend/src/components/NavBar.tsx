@@ -1,12 +1,14 @@
 import { useState } from "react";
 import "../App.css"
+
 interface NavBarProps { //sets parameters to pass the name and image from the app.tsx file
     brandName: string;
     imageSrcPath: string;
     navItems: string[];
+    onSelect: (item: string) => void;
 }
 
-function NavBar({ brandName, imageSrcPath, navItems }: NavBarProps) { // creates the nav bar component with colours, img and name icons
+function NavBar({ brandName, imageSrcPath, navItems, onSelect }: NavBarProps) { // creates the nav bar component with colours, img and name icons
     const [selectedIndex, setSelectedIndex] = useState(-1);
     return (
         <nav className="navbar navbar-expand-md navbar-light bg-white shadow">
@@ -41,21 +43,15 @@ function NavBar({ brandName, imageSrcPath, navItems }: NavBarProps) { // creates
                     id="navbarSupportedContent"
                 >
                     <ul className="navbar-nav me-auto mb-2 mb-md-1">
-                        {navItems.map((items, index) =>
+                        {navItems.map((item) =>
                         (
                             <li
-                                key={items}
+                                key={item}
                                 className="nav-item"
-                                onClick={() => setSelectedIndex(index)}
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => onSelect(item)}
                             >
-                                <a className={
-                                    selectedIndex == index
-                                        ? "nav-link active fw-bold"
-                                        : "nav-link"
-                                }
-                                    href="#">
-                                    {items}
-                                </a>
+                                <a className="nav-link">{item}</a>
                             </li>
                         ))}
                     </ul>
@@ -76,5 +72,3 @@ function NavBar({ brandName, imageSrcPath, navItems }: NavBarProps) { // creates
         </nav>
     )
 }
-
-export default NavBar
