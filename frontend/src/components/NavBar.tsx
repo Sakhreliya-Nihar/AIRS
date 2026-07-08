@@ -72,3 +72,5 @@ function NavBar({ brandName, imageSrcPath, navItems, onSelect }: NavBarProps) { 
         </nav>
     )
 }
+
+export default NavBar
