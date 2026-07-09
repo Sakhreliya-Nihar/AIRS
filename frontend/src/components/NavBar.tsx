@@ -1,7 +1,7 @@
-import { useState } from "react";
+//import { useState } from "react";
 import "../App.css"
 
-interface NavBarProps { //sets parameters to pass the name and image from the app.tsx file
+interface NavBarProps {
     brandName: string;
     imageSrcPath: string;
     navItems: string[];
@@ -9,7 +9,7 @@ interface NavBarProps { //sets parameters to pass the name and image from the ap
 }
 
 function NavBar({ brandName, imageSrcPath, navItems, onSelect }: NavBarProps) { // creates the nav bar component with colours, img and name icons
-    const [selectedIndex, setSelectedIndex] = useState(-1);
+    //const [selectedIndex, setSelectedIndex] = useState(-1);
     return (
         <nav className="navbar navbar-expand-md navbar-light bg-white shadow">
             <div className="container-fluid">
