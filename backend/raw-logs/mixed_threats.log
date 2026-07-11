@@ -1,0 +1,13 @@
+July 08 03:15:01 server-prod CRON[1122]: (root) CMD (run-parts /etc/cron.hourly)
+July 08 03:17:22 server-prod kernel: [8392.11] IPTables-Dropped: IN=eth0 OUT= MAC=00:11:22:33:44:55 SRC=103.44.22.11 DST=192.168.1.20 PROTO=TCP SPT=4433 DPT=23 FLAGS=SYN
+July 08 03:17:23 server-prod kernel: [8392.12] IPTables-Dropped: IN=eth0 OUT= MAC=00:11:22:33:44:55 SRC=103.44.22.11 DST=192.168.1.20 PROTO=TCP SPT=4433 DPT=2323 FLAGS=SYN
+July 08 03:17:25 server-prod kernel: [8392.15] IPTables-Dropped: IN=eth0 OUT= MAC=00:11:22:33:44:55 SRC=103.44.22.11 DST=192.168.1.20 PROTO=TCP SPT=4433 DPT=3389 FLAGS=SYN
+July 08 03:18:10 server-prod sshd[4401]: Failed password for root from 211.22.33.44 port 49202 ssh2
+July 08 03:18:12 server-prod sshd[4401]: Failed password for root from 211.22.33.44 port 49202 ssh２
+July 08 03:18:15 server-prod sshd[4403]: Invalid user oracle from 211.22.33.44 port 49204
+July 08 03:18:15 server-prod sshd[4403]: Failed password for invalid user oracle from 211.22.33.44 port 49204 ssh2
+July 08 03:19:00 server-prod systemd[1]: Started Unexpected Service 'win32.exe' from /tmp/.
+July 08 03:19:05 server-prod networking[500]: Suspicious outbound connection detected: SRC=192.168.1.20 DST=185.22.11.1 (Known Malicious IP) PROTO=UDP
+July 08 03:19:10 server-prod sshd[4405]: Accepted password for user admin from 211.22.33.44 port 49210 ssh2
+July 08 03:19:11 server-prod sudo: admin : TTY=pts/0 ; PWD=/home/admin ; USER=root ; COMMAND=/bin/rm -rf /var/log/auth.log
+July 08 03:20:01 server-prod CRON[1155]: (root) CMD (echo "System Compromised" > /etc/motd)

@@ -1,0 +1,61 @@
+# 1. SETUP CONFIGURATION
+DEFINE source_directory = "/var/log/app_logs"   # Where the logs are born
+DEFINE target_directory = "./lira_ingestion"    # Where LIRA waits for them
+DEFINE accepted_extensions = [".log", ".txt"]   # What we care about
+
+IMPORT file_system_library  (e.g., os, shutil)
+IMPORT time_library
+
+# 2. DEFINE THE MAIN LOGIC
+FUNCTION start_log_watcher():
+
+    # Safety Check: Do folders exist?
+    IF source_directory does not exist:
+        PRINT "Error: Source folder missing."
+        STOP program
+    
+    IF target_directory does not exist:
+        CREATE target_directory
+        PRINT "Created destination folder."
+
+    # 3. START ENDLESS LOOP (The "Daemon" mode)
+    WHILE True:
+        PRINT "Checking for new logs..."
+
+        # Get all files currently in the source folder
+        all_files = GET_LIST_OF_FILES(source_directory)
+
+        FOR each file IN all_files:
+            
+            # A. Check if it is a log file
+            IF file_extension IS IN accepted_extensions:
+                
+                # Construct full paths
+                source_path = source_directory + "/" + file
+                destination_path = target_directory + "/" + file
+
+                # B. Avoid duplicates
+                # We only want to copy if it's not already there
+                IF file DOES NOT EXIST IN target_directory:
+                    
+                    TRY:
+                        COPY source_path TO destination_path
+                        PRINT "Success: Copied " + file
+                        
+                        # Optional: Add a timestamp or hash to verify integrity
+                        
+                    CATCH Error:
+                        PRINT "Failed to copy file: " + Error message
+                
+                ELSE:
+                    # Optional: Check if the source file is newer than the copy
+                    IF source_file_modified_time > destination_file_modified_time:
+                         OVERWRITE destination_path WITH source_path
+                         PRINT "Updated: " + file
+
+        # C. Wait before checking again (Pollling)
+        # Prevents the CPU from running at 100%
+        SLEEP for 10 seconds
+
+# 4. RUN THE PROGRAM
+CALL start_log_watcher()

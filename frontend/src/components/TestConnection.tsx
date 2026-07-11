@@ -1,6 +1,6 @@
 // src/components/TestConnection.tsx
 import { useState } from 'react';
-import { db } from '../firebase'; // Import the db export from Step 1
+import { db } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
 
 const TestConnection = () => {
@@ -10,7 +10,7 @@ const TestConnection = () => {
         setStatus("Sending...");
         try {
             await addDoc(collection(db, "test_connectivity"), {
-                message: "Hello SIRA (TS)",
+                message: "Hello AIRS (TS)",
                 timestamp: new Date()
             });
             setStatus("Success! Data sent.");
@@ -21,8 +21,8 @@ const TestConnection = () => {
     };
 
     return (
-        <div style={{ padding: '20px', border: '2px solid cyan', margin: '20px', color: 'white' }}>
-            <h3>🔥 SIRA Connection Test</h3>
+        <div>
+            <h3>AIRS Connection Test</h3>
             <p>{status}</p>
             <button onClick={sendTestData}>Test Firebase Connection</button>
         </div>

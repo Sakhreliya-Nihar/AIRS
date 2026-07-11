@@ -1,0 +1,10 @@
+June 23 091401 server-01 sshd[10201] pam_unix(sshdauth) authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=192.168.1.44  user=root
+June 23 091403 server-01 sshd[10201] Failed password for root from 192.168.1.44 port 44212 ssh2
+June 23 091405 server-01 sshd[10203] Invalid user admin from 192.168.1.44 port 44214
+June 23 091405 server-01 sshd[10203] Failed password for invalid user admin from 192.168.1.44 port 44214 ssh2
+June 23 091408 server-01 sshd[10205] Invalid user guest from 192.168.1.44 port 44216
+June 23 091408 server-01 sshd[10205] Failed password for invalid user guest from 192.168.1.44 port 44216 ssh2
+June 23 091522 server-01 sshd[10209] Accepted password for user manager from 192.168.1.44 port 44220 ssh2
+June 23 091522 server-01 systemd[1] Started Session 42 of user manager.
+June 23 091601 server-01 sudo manager  TTY=pts0 ; PWD=homemanager ; USER=root ; COMMAND=usrbincat etcshadow
+June 23 091605 server-01 kernel [23423.21] IPTables-Dropped IN=eth0 OUT= MAC=001122334455 SRC=192.168.1.44 DST=10.0.0.5 PROTO=TCP SPT=44220 DPT=445 FLAGS=SYN
