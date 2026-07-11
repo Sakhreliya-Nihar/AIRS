@@ -3,6 +3,8 @@ import NavBar from "./components/NavBar";
 import Analytics from "./pages/Analytics";
 import Incidents from "./pages/Incidents";
 import Settings from "./pages/Settings";
+import TestConnection from './components/TestConnection';
+
 import 'bootstrap/dist/css/bootstrap.css';
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import imagePath from "./assets/placeholder-img.png";
@@ -14,6 +16,10 @@ function App() {
 
   return (
     <div>
+      {/* --- TEMPORARY TEST SECTION --- */}
+      <TestConnection />
+      {/* ----------------------------- */}
+
       <NavBar
         brandName="Dashboard"
         imageSrcPath={imagePath}
@@ -27,6 +33,10 @@ function App() {
         {activePage === "Settings" && <Settings />}
       </div>
     </div>
+
+
+
+
   )
 }
 
