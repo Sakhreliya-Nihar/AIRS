@@ -1,0 +1,116 @@
+// ---------------------------------------------------------
+// 1. LIBRARIES & IMPORTS
+// ---------------------------------------------------------
+IMPORT OS (Operating System commands)
+IMPORT Time
+IMPORT Sys (System commands)
+IMPORT JSON (For formatting data for LLM)
+IMPORT Regex (For finding patterns like IPs/Emails)
+
+// ---------------------------------------------------------
+// 2. GLOBAL CONFIGURATION
+// ---------------------------------------------------------
+SET Source_Dir = "path/to/backend/raw-logs"
+SET Dest_Dir   = "path/to/backend/cleaned-logs"
+SET Accepted_Extensions = [".log", ".txt"]
+
+// Define Regex Patterns for privacy (Sanitization)
+SET Pattern_IP    = Regex("\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")
+SET Pattern_Email = Regex("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+
+// ---------------------------------------------------------
+// 3. HELPER FUNCTION: Sanitize & Save
+//    (This replaces the simple 'Copy' command)
+// ---------------------------------------------------------
+FUNCTION Sanitize_And_Save(source_path, destination_folder, original_filename):
+
+    TRY:
+        // A. Read the raw text
+        raw_text = ReadFile(source_path)
+
+        // B. Sanitize (Redact sensitive info)
+        clean_text = RegexReplace(raw_text, Pattern_IP, "<REDACTED_IP>")
+        clean_text = RegexReplace(clean_text, Pattern_Email, "<REDACTED_EMAIL>")
+
+        // C. Validate (Skip empty files)
+        IF length(clean_text) is 0:
+            RETURN False ("File was empty")
+
+        // D. Structure Data for LLM
+        log_object = {
+            "original_name": original_filename,
+            "processed_time": GetCurrentTime(),
+            "status": "clean",
+            "content": clean_text
+        }
+
+        // E. Convert to JSON String
+        json_output = ConvertToJSON(log_object)
+
+        // F. Save to Destination with new extension (.json)
+        new_filename = ReplaceExtension(original_filename, ".json")
+        final_dest_path = CombinePath(destination_folder, new_filename)
+
+        WriteFile(final_dest_path, json_output)
+        
+        RETURN True ("Success")
+
+    CATCH Error:
+        Print("Error processing file: " + Error)
+        RETURN False
+
+// ---------------------------------------------------------
+// 4. MAIN FUNCTION: The Watcher
+// ---------------------------------------------------------
+FUNCTION Log_Watcher():
+
+    // A. Check if directories exist
+    FOR EACH directory IN [Source_Dir, Dest_Dir]:
+        IF DirectoryExists(directory) IS False:
+            EXIT Program ("Error: Directory missing")
+
+    PRINT "Checking for new logs..."
+
+    // B. Get files
+    all_files = GetFileList(Source_Dir)
+
+    FOR EACH file IN all_files:
+
+        file_name = GetName(file)
+        file_ext  = GetExtension(file)
+
+        // C. Check Extension
+        IF file_ext IN Accepted_Extensions:
+            
+            PRINT "Log File " + file_name + " is Valid"
+
+            source_file_path = CombinePath(Source_Dir, file)
+
+            // D. Check for Duplicate (CRITICAL CHANGE)
+            // We must check if the .json version exists, not the .log version
+            json_filename = ReplaceExtension(file, ".json")
+            dest_file_path = CombinePath(Dest_Dir, json_filename)
+
+            is_duplicate = CheckFileExists(dest_file_path)
+
+            IF is_duplicate IS False:
+                
+                // E. Process the file
+                // Call our helper function instead of copying
+                success = CALL Sanitize_And_Save(source_file_path, Dest_Dir, file)
+
+                IF success IS True:
+                    PRINT "Success: Sanitized and saved " + json_filename
+                ELSE:
+                    PRINT "Failed to process " + file
+
+            ELSE:
+                PRINT file + " already exists (as JSON) in destination folder"
+        
+        ELSE:
+            PRINT "Not a valid file extension"
+
+// ---------------------------------------------------------
+// 5. EXECUTION
+// ---------------------------------------------------------
+CALL Log_Watcher()

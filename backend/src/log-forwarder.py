@@ -1,14 +1,40 @@
-import os 
-import time
-import shutil
-import sys
+import os, datetime, sys, shutil, sys, json, re, cryptography
+from cryptography.fernet import Fernet 
+
+key = Fernet.generate_key() #randomly generate a key
+fernet = Fernet.generate_key
 
 src_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend//raw-logs" # directory where raw logs come from an ids
 dst_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend//clean-logs" # raw logs cleaned and sent to dst
+
 acc_ext = [".log", ".txt"] # accepted file extensions
+#pattern_ip = re.search ("\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}") #regex for log sanitisation
+#pattern_email = ("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+
+def split_file(file): #splits the file to get the extension
+    split_file = os.path.splitext(file)
+       
+    # print("Filename = " + file_name); ..
+    # print("Extension = " + file_ext ); ..
+
+    # return both values
+    return split_file[0], split_file[1]
+()
+
+def log_sanitiser(src_file):
+    try: 
+        with open(src_file, "r") as f: #open and read the raw log file
+            raw_text = f.read()
+
+        shutil.copy2(src_file, dst_dir) # copy to cleaned directory
+        print ("Success: Copied file " + raw_text + " from " + src_dir + " to " + dst_dir)
+       
+    except Exception as e:
+        print("Error processing file: " + str(e))
 
 dir = [src_dir, dst_dir] 
 
+# checks the directory for log files
 def log_watcher():
 
     for i in dir: # check to see if the src and dst dirs exist
@@ -24,13 +50,7 @@ def log_watcher():
 
     for file in all_files:
         #splits the file to get the extension
-        split_file = os.path.splitext(file)
-       
-        file_name = str(split_file[0]) 
-        file_ext = str(split_file[1])
-
-       # print("Filename = " + file_name); ..
-        # print("Extension = " + file_ext ); ..
+          file_name, file_ext = split_file(file)
 
         if file_ext in acc_ext: #checks the extension is valid
             print (f"Log File {file_name} is Valid")
@@ -41,16 +61,13 @@ def log_watcher():
 
             # checks destination directory for duplicate file
             dir_dups = os.path.isfile(dst_dir_file)
-            # print(dst_dir_file);
-            # print(dir_dups);
 
             if dir_dups == False:
                 try:
-                    shutil.copy2(src_dir_file, dst_dir) # copies file from src to dst
-                    print ("Success: Copied file " + file + " from " + src_dir + " to " + dst_dir)
-
-                except: 
-                    print("Failed to copy file: " + RuntimeError) #need to look up which error is correct to use
+                    log_sanitiser(src_dir_file) # cleans file and changes into json    
+                                     
+                except Exception as e: 
+                    print(f"Failed to copy file: str{e}")  
             else:
                 print (file + " already exists in destination folder")
         else: 
