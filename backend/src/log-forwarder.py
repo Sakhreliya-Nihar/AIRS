@@ -1,8 +1,8 @@
 import os, datetime, sys, shutil, sys, json, re, cryptography
 from cryptography.fernet import Fernet 
 
-key = Fernet.generate_key() #randomly generate a key
-fernet = Fernet.generate_key
+# key = Fernet.generate_key() #randomly generate a key
+# fernet = Fernet.generate_key
 
 src_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend//raw-logs" # directory where raw logs come from an ids
 dst_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend//clean-logs" # raw logs cleaned and sent to dst
@@ -19,7 +19,8 @@ def split_file(file): #splits the file to get the extension
 
     # return both values
     return split_file[0], split_file[1]
-()
+
+
 
 def log_sanitiser(src_file):
     try: 
@@ -50,7 +51,7 @@ def log_watcher():
 
     for file in all_files:
         #splits the file to get the extension
-          file_name, file_ext = split_file(file)
+        file_name, file_ext = split_file(file)
 
         if file_ext in acc_ext: #checks the extension is valid
             print (f"Log File {file_name} is Valid")
