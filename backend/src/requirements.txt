@@ -1,1 +1,4 @@
 cryptography==44.0.1
+cffi==2.0.0
+pip==25.3
+pycparser==2.23
