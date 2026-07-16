@@ -22,6 +22,25 @@ pattern_ip = r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"
 pattern_mac = r"(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})"
 #pattern_email = ("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 
+# Define keywords for LLM logs
+SUSPICIOUS_KEYWORDS = ["failed", "dropped", "denied", "unauthorized", "refused", "compromised", "rm -rf", "sudo"]
+# list of patterns that are noisy but safe
+KNOWN_SAFE_PATTERNS = [
+    "session opened for user root",
+    "session closed for user root",
+    "systemd: started",
+    "ntpdate",
+    "authorized_keys"
+]
+
+def is_suspicious(line):
+    line_lower = line.lower()
+    # If any suspicious word is in the line, the LLM will look at it
+    return any(keyword in line_lower for keyword in SUSPICIOUS_KEYWORDS)
+
+def is_noise(line):
+    return any(pattern in line.lower() for pattern in KNOWN_SAFE_PATTERNS)
+
 def log_sanitiser(src_file):
     processed_events = [] # list to hold processed events
     file_name_only = os.path.basename(src_file)
@@ -33,6 +52,15 @@ def log_sanitiser(src_file):
             for line in lines: #extract each line of the log file individually
                 if not line.strip(): continue # skips any lines that are empty
 
+                if "CRON" in line and "CMD" in line:
+                    continue # Bins the pointless background traffic to save llm credits
+
+                suspicious_flag = is_suspicious(line)
+
+                if is_noise(line):
+                    continue # Ignore entirely
+
+                analysis_status = "pending" if suspicious_flag else "ignored_low_risk"
 
                 # remove mac address entirely for same reason as ip
                 macs = re.findall(pattern_mac, line) # find and store before redacting the text, same as ips
@@ -66,7 +94,8 @@ def log_sanitiser(src_file):
                         "ip_count": len(unique_ips) # number of ips
                     },
                     "original_filename": file_name_only, # find the original file that it came from for future reference
-                    "analysis_status": "pending" # ready for LLm later onwards
+                    "analysis_status": analysis_status, # filtered ready for LLm later
+                    "is_suspicious": suspicious_flag # flags any suspicious threats that may be worth parsing to llm
                 }
 
                 db.collection("incidents").add(event) # pushes each line into incidents collection in firestore
