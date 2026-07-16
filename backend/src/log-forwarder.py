@@ -1,6 +1,7 @@
 import os, datetime, sys, shutil, sys, json, re, cryptography, uuid, firebase_admin
 from cryptography.fernet import Fernet 
 from firebase_admin import credentials, firestore
+from pyparsing import line
 
 # Initialise Firebase 
 cred = credentials.Certificate(r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop\AIRS\backend\src\serviceAccountKey.json")
@@ -19,7 +20,7 @@ dst_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend/
 # Config for sanitisation 
 acc_ext = [".log", ".txt"] # accepted file extensions
 pattern_ip = r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"
-pattern_mac = r"([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})"
+pattern_mac = r"(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})"
 #pattern_email = ("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 
 def log_sanitiser(src_file):
@@ -34,22 +35,34 @@ def log_sanitiser(src_file):
                 if not line.strip(): continue # skips any lines that are empty
 
 
-                ips = re.findall(pattern_ip, line)#regex to find ips first
-                sanitised_line = line
-                for i, ip in enumerate(list(set(ips))): # removes duplicate ips on one line to only process once
-                    placeholder = "[internal_ip]" if ip.startswith("192.168") else f"[external_ip_{i}]" #replace real ip with placeholders for protecting privacy
-                    sanitised_line = sanitised_line.replace(ip, placeholder) # "placeholder" provides sme knowledge to know whether attacker is local or public
-
                 # remove mac address entirely for same reason as ip
-                sanitised_line = re.sub(pattern_mac, "[mac_redacted]", sanitised_line)
+                macs = re.findall(pattern_mac, line) # find and store before redacting the text, same as ips
+                sanitised_line = line
+                sanitised_line = re.sub(pattern_mac, "[MAC_REDACTED]", sanitised_line)
+
+                ips = re.findall(pattern_ip, line)#regex to find ips first
+                # Use a set to get unique IPs, then sort them to ensure consistentcy 
+                unique_ips = sorted(list(set(ips)))
+
+                for index, ip in enumerate(unique_ips):
+                    # index starts at 0 for first ip being added to fix issue that it sometimes started from 1
+                    if ip.startswith("192.168") or ip.startswith("10."): # sets as internal (local) for SME knowledge...
+                        placeholder = f"[INTERNAL_IP{index}]"
+                    else:
+                        placeholder = f"[EXTERNAL_IP_{index}]" # or external (public)
+                
+                    sanitised_line = sanitised_line.replace(ip, placeholder)
 
                 #create dictionary for log entry 
                 event = {
                     "event_id": str(uuid.uuid4())[:8], # generate unique id for every log entry
                     "timestamp": firestore.SERVER_TIMESTAMP, # timestamp created from firestore
                     "raw_sanitized_text": sanitised_line.strip(),
-                    "original_ips": ips, #keep original ips within db for internal use
-                    "detected_ips_count": len(ips),
+                    "technical_details": {
+                        "original_ips": unique_ips, #uses thee new storted ips
+                        "original_macs" : macs, # now stores the orginal mac addressess
+                        "ip_count": len(unique_ips) # number of ips
+                    },
                     "original_filename": file_name_only, # find the original file that it came from for future reference
                     "analysis_status": "pending" # ready for LLm later onwards
                 }
