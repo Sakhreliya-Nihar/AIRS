@@ -22,16 +22,54 @@ pattern_ip = r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"
 pattern_mac = r"(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})"
 #pattern_email = ("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 
-# Define keywords for LLM logs
-SUSPICIOUS_KEYWORDS = ["failed", "dropped", "denied", "unauthorized", "refused", "compromised", "rm -rf", "sudo"]
+# Define keywords for suspicious prediction
+class ThreatDictionary:
+    # 1. Web Application Attacks (SQLi, XSS, Path Traversal)
+    WEB_ATTACKS = [
+        "<script>", "alert(", "onerror=", "onload=", "eval(", "src=",  # XSS
+        "union select", "select *", "drop table", "insert into", "order by", "--", " ' or '1'='1", # SQLi
+        "../", "..\\", "etc/passwd", "windows/system32", "boot.ini", ".env", ".git" # Path Traversal / Info Leak
+    ]
+    
+    # 2. Authentication & Account Security (Brute Force / Credential Stuffing)
+    AUTH_ATTACKS = [
+        "failed password", "invalid user", "authentication failure", "unauthorized",
+        "login failed", "access denied", "bad password", "locked out", "user not found"
+    ]
+    
+    # 3. System & Malware Indicators (RCE / Post-Exploitation)
+    SYSTEM_ATTACKS = [
+        "rm -rf", "sudo", "chmod", "chown", "wget ", "curl ", "netcat", "nc -e", # Command Injection
+        "compromised", "unexpected service", "malicious", "backdoor", "shell",
+        "powershell", "base64", "python -c", "perl -e" # Common script execution
+    ]
+
+    # 4. Network Scanning & Reconnaissance (Probing)
+    RECON = [
+        "nmap", "masscan", "dirbuster", "nikto", "sqlmap", "iptables-dropped", 
+        "connection refused", "port scan"
+    ]
+
+    @classmethod
+    def get_all(cls):
+        # combine everything into one massive list for initial filter
+        return cls.WEB_ATTACKS + cls.AUTH_ATTACKS + cls.SYSTEM_ATTACKS + cls.RECON
+
+SUSPICIOUS_KEYWORDS = ThreatDictionary.get_all()
+
+
 # list of patterns that are noisy but safe
+# Expanded to include more background noise common in Linux/Web servers
 KNOWN_SAFE_PATTERNS = [
-    "session opened for user root",
-    "session closed for user root",
-    "systemd: started",
-    "ntpdate",
-    "authorized_keys"
+    "session opened", "session closed", "systemd: started", "ntpdate", 
+    "authorized_keys", "cron[", "postfix/", "dovecot:", "crond[", 
+    "reached target", "pms-refresh", "status=sent (250 2.0.0 ok", 
+    "starting update inventory", "connection closed by authenticating user"
 ]
+
+# adding batching for brute force to reduce lines being parsed to llm
+BATCH_LIMIT = 5 # Number of suspicious lines to collect before calling LLM
+suspicious_buffer = [] # Temporary list to hold lines
 
 def is_suspicious(line):
     line_lower = line.lower()
@@ -41,76 +79,96 @@ def is_suspicious(line):
 def is_noise(line):
     return any(pattern in line.lower() for pattern in KNOWN_SAFE_PATTERNS)
 
+def process_batch(batch_list):
+    print(f"\n--- [ACTION] BATCH OF {len(batch_list)} READY FOR LLM ---")
+    combined_text = "\n".join([item['raw_sanitised_text'] for item in batch_list])
+    # Future LLM call goes here
+    print(f"Combined context preview: {combined_text[:50]}...")
+
 def log_sanitiser(src_file):
     processed_events = [] # list to hold processed events
+    global suspicious_buffer
     file_name_only = os.path.basename(src_file)
     
     try: 
         with open(src_file, "r") as f: #open and read the raw log file  
             lines = f.readlines()
 
-            for line in lines: #extract each line of the log file individually
-                if not line.strip(): continue # skips any lines that are empty
+        for line in lines: #extract each line of the log file individually
+            if not line.strip(): continue # skips any lines that are empty
+            if "CRON" in line and "CMD" in line: continue # Bins the pointless background traffic to save llm credits
+            if is_noise(line): continue # Ignore 
 
-                if "CRON" in line and "CMD" in line:
-                    continue # Bins the pointless background traffic to save llm credits
+            suspicious_flag = is_suspicious(line)
+            analysis_status = "pending" if suspicious_flag else "ignored_low_risk"
 
-                suspicious_flag = is_suspicious(line)
+            #sanitisation
+            # remove mac address entirely for same reason as ip
+            macs = re.findall(pattern_mac, line) # find and store before redacting the text, same as ips
+            sanitised_line = re.sub(pattern_mac, "[MAC_REDACTED]", line) # repalce all mac oocurances with redacted text
 
-                if is_noise(line):
-                    continue # Ignore entirely
+            ips = re.findall(pattern_ip, sanitised_line)#regex to find ips first
+            # Use a set to get unique IPs, then sort them to ensure consistentcy 
+            unique_ips = sorted(list(set(ips)))
+            # Separate into two lists
+            internal_ips = [ip for ip in unique_ips if ip.startswith(("192.168.", "10."))]
+            external_ips = [ip for ip in unique_ips if ip not in internal_ips]
 
-                analysis_status = "pending" if suspicious_flag else "ignored_low_risk"
+            # External IPs now starting from 0
+            for i, ip in enumerate(external_ips):
+                sanitised_line = sanitised_line.replace(ip, f"[EXTERNAL_IP_{i}]")
+            # Internal IPs now starting from 0 (seperate to external ips)
+            for i, ip in enumerate(internal_ips):
+                sanitised_line = sanitised_line.replace(ip, f"[INTERNAL_IP_{i}]")
 
-                # remove mac address entirely for same reason as ip
-                macs = re.findall(pattern_mac, line) # find and store before redacting the text, same as ips
-                sanitised_line = line
-                sanitised_line = re.sub(pattern_mac, "[MAC_REDACTED]", sanitised_line) # repalce all mac oocurances with redacted text
+            #create dictionary for log entry 
+            event = {
+                "event_id": str(uuid.uuid4())[:8], # generate unique id for every log entry
+                "timestamp": firestore.SERVER_TIMESTAMP, # timestamp created from firestore
+                "raw_sanitised_text": sanitised_line.strip(),
+                "technical_details": {
+                    "original_internal_ips": internal_ips, # seperate list for easier detection for SOC / SME
+                    "original_external_ips": external_ips,
+                    "original_macs" : macs, # now stores the orginal mac addressess
+                    "ip_count": len(unique_ips) # number of ips
+                },
+                "original_filename": file_name_only, # find the original file that it came from for future reference
+                "analysis_status": analysis_status, # filtered ready for LLm later
+                "is_suspicious": suspicious_flag # flags any suspicious threats that may be worth parsing to llm
+            }
+ 
+            # batching logic
+            if event["is_suspicious"]:
+                # Push to Firestore
+                doc_ref = db.collection("incidents").add(event) 
+                
+                # Add doc ID for later LLM updates
+                event['doc_id'] = doc_ref[1].id 
+                
+                # Add to the buffer for batching
+                suspicious_buffer.append(event)
 
-                ips = re.findall(pattern_ip, line)#regex to find ips first
-                # Use a set to get unique IPs, then sort them to ensure consistentcy 
-                unique_ips = sorted(list(set(ips)))
-
-                # Separate into two lists
-                internal_ips = [ip for ip in unique_ips if ip.startswith(("192.168.", "10."))]
-                external_ips = [ip for ip in unique_ips if ip not in internal_ips]
-
-                # External IPs now starting from 0
-                for i, ip in enumerate(external_ips):
-                    sanitised_line = sanitised_line.replace(ip, f"[EXTERNAL_IP_{i}]")
-
-                # Internal IPs now starting from 0 (seperate to external ips)
-                for i, ip in enumerate(internal_ips):
-                    sanitised_line = sanitised_line.replace(ip, f"[INTERNAL_IP_{i}]")
-                #create dictionary for log entry 
-                event = {
-                    "event_id": str(uuid.uuid4())[:8], # generate unique id for every log entry
-                    "timestamp": firestore.SERVER_TIMESTAMP, # timestamp created from firestore
-                    "raw_sanitized_text": sanitised_line.strip(),
-                    "technical_details": {
-                        "original_internal_ips": internal_ips, # seperate list for easier detection for SOC / SME
-                        "original_external_ips": external_ips,
-                        "original_macs" : macs, # now stores the orginal mac addressess
-                        "ip_count": len(unique_ips) # number of ips
-                    },
-                    "original_filename": file_name_only, # find the original file that it came from for future reference
-                    "analysis_status": analysis_status, # filtered ready for LLm later
-                    "is_suspicious": suspicious_flag # flags any suspicious threats that may be worth parsing to llm
-                }
-
-                db.collection("incidents").add(event) # pushes each line into incidents collection in firestore
-                processed_events.append(event)
-
-            # save dictionary as JSON for llm parsing 
-            output_filename = file_name_only.replace(".log", ".json")
-            dst_path = f"{dst_dir}//{output_filename}"
-
-
-            with open(dst_path, "w") as f:
-                json.dump(processed_events, f, indent=4, default=str)
+                # Trigger batch if limit reached
+                if len(suspicious_buffer) >= BATCH_LIMIT:
+                    process_batch(suspicious_buffer)
+                    suspicious_buffer = [] 
             
-            print(f"Success: Sanitised {len(processed_events)} lines and uploaded to Firestore.")
-            return dst_path 
+            # everything appended to processed_events so LOCAL JSON 
+            # files remain a complete record of the whole log file
+            processed_events.append(event)
+
+        if len(suspicious_buffer) > 0: # process remaining suspicious items
+            process_batch(suspicious_buffer)
+            suspicious_buffer = []
+
+        # save dictionary as JSON for llm parsing 
+        output_filename = file_name_only.replace(".log", ".json")
+        dst_path = os.path.join(dst_dir, output_filename)
+        with open(dst_path, "w") as f:
+            json.dump(processed_events, f, indent=4, default=str)
+            
+        print(f"Success: Sanitised {len(processed_events)} lines and uploaded to Firestore.")
+        return processed_events 
         
     except Exception as e:
         print("Error processing file: " + str(e))
