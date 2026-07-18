@@ -1,13 +1,45 @@
-import os, datetime, sys, shutil, sys, json, re, cryptography, uuid, firebase_admin
+import os, datetime, sys, json, re, uuid, firebase_admin, time
 from cryptography.fernet import Fernet 
 from firebase_admin import credentials, firestore
+from dotenv import load_dotenv
+from google import genai
+
+ENV_PATH = r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop\AIRS\backend\src\.env"
+load_dotenv(ENV_PATH)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Create a single client object
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialise Firebase 
 cred = credentials.Certificate(r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop\AIRS\backend\src\serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-encryption_key = Fernet.generate_key() #randomly generate a key 
-cipher = Fernet(encryption_key) # value of key assigned to var
+def get_or_create_key():
+
+    key = os.getenv("ENCRYPTION_KEY")
+
+    if not key:
+        print("No encryption key found. Generating a new one...")
+        # 2. Generate a new key
+        new_key = Fernet.generate_key().decode() # decode to string for .env
+        
+        # 3. Write it to the .env file so it persists
+        with open(ENV_PATH, "a") as f:
+            # Add a newline just in case the file doesn't end with one
+            f.write(f"\nENCRYPTION_KEY={new_key}")
+        
+        print(f"Success: New key written to {ENV_PATH}")
+        return new_key
+    
+    return key
+
+# Initialize the key and cipher
+raw_key = get_or_create_key()
+cipher = Fernet(raw_key.encode()) # Convert string back to bytes for Fernet
+
+local_time = datetime.datetime.now().isoformat() # timestamp for cleaned logs
 
 # Directories for pc and laptop 
 src_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend//raw-logs" # directory where raw logs come from an ids
@@ -68,7 +100,7 @@ KNOWN_SAFE_PATTERNS = [
 ]
 
 # adding batching for brute force to reduce lines being parsed to llm
-BATCH_LIMIT = 5 # Number of suspicious lines to collect before calling LLM
+BATCH_LIMIT = 20 # Number of suspicious lines to collect before calling LLM
 suspicious_buffer = [] # Temporary list to hold lines
 
 def is_suspicious(line):
@@ -80,10 +112,59 @@ def is_noise(line):
     return any(pattern in line.lower() for pattern in KNOWN_SAFE_PATTERNS)
 
 def process_batch(batch_list):
+
+    # takes plantext data, snesds to llm as a group to save credits, then updates firestore
     print(f"\n--- [ACTION] BATCH OF {len(batch_list)} READY FOR LLM ---")
-    combined_text = "\n".join([item['raw_sanitised_text'] for item in batch_list])
-    # Future LLM call goes here
-    print(f"Combined context preview: {combined_text[:50]}...")
+
+    # Group the cleaned logs from memory
+    combined_text = "\n".join([f"ID {item['event_id']}: {item['raw_sanitised_text']}" for item in batch_list])
+
+    try: 
+
+        print("Waiting 60 seconds for API rate limits...")
+        time.sleep(61)
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash-lite',
+            contents=f"""Analyze these logs for a small/medium business owner. Explain what happened in a clear, non-technical way and give a simple recommendation."
+
+            LOGS:
+            {combined_text}
+            
+            Return ONLY a JSON list of objects:
+            [{{ "summary": "...", "recommendation": "...", "risk_score": 1-10 }}]
+            """
+        )
+
+        # print (response)    
+        raw_text = response.text.replace("```json", "").replace("```", "").strip()
+        ai_results = json.loads(raw_text)
+        ai_json = json.dumps(ai_results)
+        encrypted_insights = cipher.encrypt(ai_json.encode()).decode()
+
+        print(f"--- [AI ANALYSIS] ---")
+        for res in ai_results:
+            print(f"Risk: {res['risk_score']}/10 | Summary: {res['summary'][:50]}...")
+
+        # Update Firestore
+        for item in batch_list:
+            doc_id = item.get("doc_id")
+            if doc_id:
+                db.collection("incidents").document(doc_id).update({
+                    "ai_insights": encrypted_insights,
+                    "analysis_status": "completed"
+                })
+        print("Success: Encrypted AI Analysis published to firestore")
+
+    except Exception as e:
+        # If rate limit hit...
+        if "429" in str(e):
+            print("RATE LIMIT HIT: The script is moving too fast for the Gemini Free Tier.")
+            print("Action: Increase BATCH_LIMIT or wait 60 seconds before running again.")
+        elif "404" in str(e):
+            print("MODEL NOT FOUND.")
+        else:
+            print(f"LLM Error: {e}")
 
 def log_sanitiser(src_file):
     processed_events = [] # list to hold processed events
@@ -124,7 +205,8 @@ def log_sanitiser(src_file):
             #create dictionary for log entry 
             event = {
                 "event_id": str(uuid.uuid4())[:8], # generate unique id for every log entry
-                "timestamp": firestore.SERVER_TIMESTAMP, # timestamp created from firestore
+                "local_timestamp": local_time, # timestamp created from local clock
+                "firestore_timestamp" : firestore.SERVER_TIMESTAMP,
                 "raw_sanitised_text": sanitised_line.strip(),
                 "technical_details": {
                     "original_internal_ips": internal_ips, # seperate list for easier detection for SOC / SME
@@ -162,10 +244,10 @@ def log_sanitiser(src_file):
 
                 # Trigger batch if limit reached
                 if len(suspicious_buffer) >= BATCH_LIMIT:
-                    process_batch(suspicious_buffer)
-                    suspicious_buffer = [] 
+                    process_batch(suspicious_buffer) # send to LLM 
+                    suspicious_buffer = [] # clear the buffer back to empty
             
-            # everything appended to processed_events so LOCAL JSON 
+            # everything (inlucding unsuspicious data) appended to processed_events so LOCAL JSON  
             # files remain a complete record of the whole log file
             processed_events.append(event)
 
