@@ -1,8 +1,8 @@
 import os, datetime, sys, json, re, uuid, firebase_admin, time
-from cryptography.fernet import Fernet 
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
 from google import genai
+from security.crypto import encrypt_payload # removed encryption within this file and added it to a new helper function 
 
 ENV_PATH = r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop\AIRS\backend\src\.env"
 load_dotenv(ENV_PATH)
@@ -16,28 +16,7 @@ cred = credentials.Certificate(r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-def get_or_create_key():
 
-    key = os.getenv("ENCRYPTION_KEY")
-
-    if not key:
-        print("No encryption key found. Generating a new one...")
-        # 2. Generate a new key
-        new_key = Fernet.generate_key().decode() # decode to string for .env
-        
-        # 3. Write it to the .env file so it persists
-        with open(ENV_PATH, "a") as f:
-            # Add a newline just in case the file doesn't end with one
-            f.write(f"\nENCRYPTION_KEY={new_key}")
-        
-        print(f"Success: New key written to {ENV_PATH}")
-        return new_key
-    
-    return key
-
-# Initialize the key and cipher
-raw_key = get_or_create_key()
-cipher = Fernet(raw_key.encode()) # Convert string back to bytes for Fernet
 
 local_time = datetime.datetime.now().isoformat() # timestamp for cleaned logs
 
@@ -140,7 +119,7 @@ def process_batch(batch_list):
         raw_text = response.text.replace("```json", "").replace("```", "").strip()
         ai_results = json.loads(raw_text)
         ai_json = json.dumps(ai_results)
-        encrypted_insights = cipher.encrypt(ai_json.encode()).decode()
+        encrypted_insights = encrypt_payload(ai_results)
 
         print(f"--- [AI ANALYSIS] ---")
         for res in ai_results:
@@ -224,8 +203,7 @@ def log_sanitiser(src_file):
 
 
                 #encrypt files 
-                event_json = json.dumps(event, default=str).encode() # convert to json string and then to bytes
-                encrypted_token = cipher.encrypt(event_json).decode() # decode back to string for storage
+                encrypted_token = encrypt_payload(event) 
 
                 # Firestore needs to recieve a dictionary { "key": "value" }
                 encrypted_payload = {
