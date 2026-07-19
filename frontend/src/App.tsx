@@ -3,7 +3,6 @@ import NavBar from "./components/NavBar";
 import Analytics from "./pages/Analytics";
 import Incidents from "./pages/Incidents";
 import Settings from "./pages/Settings";
-import TestConnection from './components/TestConnection';
 
 import 'bootstrap/dist/css/bootstrap.css';
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
@@ -30,16 +29,12 @@ function App() {
         {activePage === "Analytics" && <Analytics />}
         {activePage === "Incidents" && <Incidents />}
         {activePage === "Settings" && <Settings />}
-        {/* --- TEMPORARY TEST SECTION --- */}
-        <TestConnection />
-        {/* ----------------------------- */}
-
       </div>
+
+
+
+
     </div>
-
-
-
-
   )
 }
 
