@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 from google import genai
 from security.crypto import encrypt_payload # removed encryption within this file and added it to a new helper function 
 
-ENV_PATH = r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop\AIRS\backend\src\.env"
+current_dir = os.path.dirname(__file__)#trying to fix pathing issues between laptop and pc
+ENV_PATH = os.path.join(current_dir, ".env")
 load_dotenv(ENV_PATH)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -12,7 +13,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialise Firebase 
-cred = credentials.Certificate(r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop\AIRS\backend\src\serviceAccountKey.json")
+cred = credentials.Certificate(os.path.join(current_dir, "serviceAccountKey.json"))
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 

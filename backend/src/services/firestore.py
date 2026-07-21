@@ -1,10 +1,9 @@
-import firebase_admin
+import firebase_admin, os
 from firebase_admin import credentials, firestore
 from security.crypto import decrypt_payload
 
-cred = credentials.Certificate(
-    r"C:\Users\HP\OneDrive\Pictures\Documents\Desktop\AIRS\backend\src\serviceAccountKey.json"
-)
+current_dir = os.path.dirname(__file__)
+cred = credentials.Certificate(os.path.join(current_dir, "..", "serviceAccountKey.json"))
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
