@@ -22,9 +22,8 @@ db = firestore.client()
 local_time = datetime.datetime.now().isoformat() # timestamp for cleaned logs
 
 # Directories for pc and laptop 
-src_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend//raw-logs" # directory where raw logs come from an ids
-
-dst_dir = "C://Users//HP//OneDrive//Pictures//Documents//Desktop//AIRS//backend//clean-logs" # raw logs cleaned and sent to dst
+src_dir = os.path.join(current_dir, "..", "raw-logs")
+dst_dir = os.path.join(current_dir, "..", "cleaned-logs") 
 
 
 
@@ -106,35 +105,49 @@ def process_batch(batch_list):
 
         response = client.models.generate_content(
             model='gemini-2.5-flash-lite',
-            contents=f"""Analyze these logs for a small/medium business owner. Explain what happened in a clear, non-technical way and give a simple recommendation."
+            contents=f"""Analyze each of these logs individually for a small/medium business owner. Explain what happened in a clear, non-technical way and give a simple recommendation."
 
             LOGS:
             {combined_text}
             
-            Return ONLY a JSON list of objects:
-            [{{ "summary": "...", "recommendation": "...", "risk_score": 1-10 }}]
+            Return ONLY a JSON list of objects, one for each ID provided:
+            [
+              {{ 
+                "event_id": "the_original_id",
+                "summary": "Specific non-technical summary for this log", 
+                "recommendation": "Specific recommendation for this log", 
+                "risk_score": 1-10 
+              }}
+            ] 
             """
         )
 
         # print (response)    
         raw_text = response.text.replace("```json", "").replace("```", "").strip()
         ai_results = json.loads(raw_text)
-        ai_json = json.dumps(ai_results)
-        encrypted_insights = encrypt_payload(ai_results)
 
-        print(f"--- [AI ANALYSIS] ---")
-        for res in ai_results:
-            print(f"Risk: {res['risk_score']}/10 | Summary: {res['summary'][:50]}...")
+        # Map results by event_id for easy lookup
+        results_map = {res['event_id']: res for res in ai_results}
 
-        # Update Firestore
+        # Update Firestore individually for each item in the batch
         for item in batch_list:
             doc_id = item.get("doc_id")
-            if doc_id:
+            event_id = item.get("event_id")
+            
+            if event_id in results_map and doc_id:
+                res = results_map[event_id]
+                # Encrypt the INDIVIDUAL insight
+                encrypted_insights = encrypt_payload({
+                    "summary": res['summary'],
+                    "recommendation": res['recommendation'],
+                    "risk_score": res['risk_score']
+                })
                 db.collection("incidents").document(doc_id).update({
-                    "ai_insights": encrypted_insights,
+                    "ai_insights": [encrypted_insights], # Save as a list for your frontend
+                    "risk_score": res['risk_score'], # Store plain for analytics
                     "analysis_status": "completed"
                 })
-        print("Success: Encrypted AI Analysis published to firestore")
+        print("Success: Individual AI Analysis published to firestore")
 
     except Exception as e:
         # If rate limit hit...
@@ -216,7 +229,8 @@ def log_sanitiser(src_file):
                 doc_ref = db.collection("incidents").add(encrypted_payload) 
                 
                 # Add doc ID for later LLM updates
-                event['doc_id'] = doc_ref[1].id 
+                actual_doc_id = doc_ref[1].id
+                event['doc_id'] = actual_doc_id # The Firestore UUID (e.g., "zX9yP...") 
                 
                 # Add to the buffer for batching
                 suspicious_buffer.append(event)

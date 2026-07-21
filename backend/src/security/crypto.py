@@ -25,5 +25,13 @@ def encrypt_payload(data_dict: dict) -> str:
     return cipher.encrypt(json_data).decode()
 
 def decrypt_payload(encrypted_string: str):
-    decrypted_bytes = cipher.decrypt(encrypted_string.encode()) # decrypts the ciphertext to plaintext bytes
-    return json.loads(decrypted_bytes.decode()) # returns plaintext as back a string from bytes
+    # If for some reason we get a list instead of a string, catch it here
+    if not isinstance(encrypted_string, str):
+        print(f"Error: Expected string for decryption, got {type(encrypted_string)}")
+        return None
+        
+    try:
+        decrypted_bytes = cipher.decrypt(encrypted_string.encode())
+        return json.loads(decrypted_bytes.decode())
+    except Exception as e:
+        return None

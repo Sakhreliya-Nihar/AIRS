@@ -14,27 +14,37 @@ db = firestore.client() # connecting to firestore
 def get_incidents(): 
     incidents = []
 
-    docs = (
-        db.collection("incidents") # get the incidents collection...
-        .order_by("timestamp", direction=firestore.Query.DESCENDING) # with most recent events at the top...
-        .limit(100) # prevents thousands of logs being downloaded at once
-        .stream() # reads one by one
-    )
+    docs = db.collection("incidents").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(100).stream()
 
     for doc in docs:
         data = doc.to_dict()
-        decrypted_event = decrypt_payload(data["data"]) # decrypt each incident using crypto.py...
+        # 1. Decrypt the main log data (this is usually a string)
+        decrypted_event = decrypt_payload(data["data"])
+        
+        if decrypted_event is None:
+            continue
+
+        # 2. Handle ai_insights (stored as a list)
 
         ai_insights = None
-        if "ai_insights" in data:
-            ai_insights = decrypt_payload(data["ai_insights"]) # and each ai insight as well
+        raw_insights = data.get("ai_insights")
+        
+        if raw_insights:
+            # Check if it's a list and has at least one item
+            if isinstance(raw_insights, list) and len(raw_insights) > 0:
+                # Decrypt the FIRST string in the list
+                ai_insights = [decrypt_payload(raw_insights[0])]
+            elif isinstance(raw_insights, str):
+                # Fallback for old data stored as a single string
+                ai_insights = [decrypt_payload(raw_insights)]
 
-        incidents.append({ # add back to json format 
+        incidents.append({
             "id": doc.id,
             "event": decrypted_event,
             "ai_insights": ai_insights,
             "analysis_status": data.get("analysis_status", "pending"),
-            "timestamp": data.get("timestamp")
+            "timestamp": data.get("timestamp"),
+            "user_notes": data.get("user_notes", []) # Ensure notes don't break if missing
         })
 
-    return incidents # returns the json incident to incidents.py
+    return incidents

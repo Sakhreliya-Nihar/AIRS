@@ -4,38 +4,41 @@ import Analytics from "./pages/Analytics";
 import Incidents from "./pages/Incidents";
 import Settings from "./pages/Settings";
 
-import 'bootstrap/dist/css/bootstrap.css';
-import "bootstrap/dist/js/bootstrap.bundle.min.js";
+// Bootstrap imports to prevent CSS conflicts with Tailwind
 import imagePath from "./assets/placeholder-img.png";
 
 function App() {
   const [activePage, setActivePage] = useState("Analytics");
 
-  let items = ["Analytics", "Incidents", "Settings"];
+  const navItems = ["Analytics", "Incidents", "Settings"];
 
   return (
-    <div>
+    // min-h-screen ensures the background color covers the whole page
+    // bg-[#FDFCFE] matches dashboard theme
+    <div className="min-h-screen bg-[#FDFCFE]">
 
-
-
+      {/* Navigation Bar */}
       <NavBar
-        brandName="Dashboard"
+        brandName="SOC Engine"
         imageSrcPath={imagePath}
-        navItems={items}
+        navItems={navItems}
         onSelect={(item) => setActivePage(item)}
+        activeItem={activePage} // gets passed so current page can be highlighted
       />
 
-      <div className="content-container">
-        {activePage === "Analytics" && <Analytics />}
-        {activePage === "Incidents" && <Incidents />}
-        {activePage === "Settings" && <Settings />}
-      </div>
-
-
-
+      {/* Main Page Content Area 
+        max-w-[1600px] keeps the dashboard from becoming too wide on ultra-wide monitors
+      */}
+      <main className="max-w-[1600px] mx-auto px-4 py-6">
+        <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+          {activePage === "Analytics" && <Analytics />}
+          {activePage === "Incidents" && <Incidents />}
+          {activePage === "Settings" && <Settings />}
+        </div>
+      </main>
 
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
