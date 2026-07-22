@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 /* ---------- Types ---------- */
+
 interface AIInsight {
     summary: string;
     recommendation: string;
@@ -13,7 +14,6 @@ interface IncidentEvent {
     original_filename: string;
     local_timestamp: string;
 }
-
 interface Incident {
     id: string;
     event: IncidentEvent;
@@ -49,8 +49,7 @@ export default function Incidents() {
         console.error("Failed to load incidents", err);
         setLoading(false);
     });
-}
-    };
+};
 
 /* ---------- Action Handlers ---------- */
 const handleMarkResolved = async (docId: string) => {
@@ -64,6 +63,7 @@ const handleMarkResolved = async (docId: string) => {
         }
     } catch (err) { console.error(err); }
 };
+
 const handleSaveNote = async (docId: string) => {
     if (!note.trim()) return;
     try {
@@ -124,6 +124,7 @@ if (selectedIncident) {
                         : "bg-purple-600 border-purple-600 text-white hover:bg-purple-700"
                         }`}
                 >
+
                     {selectedIncident.analysis_status === 'resolved' ? "RESOLVED" : "MARK RESOLVED"}
                 </button>
             </div>
@@ -136,6 +137,7 @@ if (selectedIncident) {
                             {selectedIncident.event.raw_sanitised_text}
                         </pre>
                     </div>
+
                     <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-50">
                         <h3 className="font-black text-gray-400 text-[10px] uppercase tracking-widest mb-4">Analyst Notes</h3>
                         <div className="space-y-2 mb-4">
@@ -231,5 +233,4 @@ return (
         </div>
     </div>
 );
-
 }
