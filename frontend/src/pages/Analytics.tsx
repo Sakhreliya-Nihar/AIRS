@@ -74,7 +74,7 @@ export default function Analytics() {
             console.error("API Error:", err);
             setError("API Offline"); // Update UI to show connection error
         } finally {
-            setLoading(false);      // Remove initial skeleton/spinner
+            setLoading(false);      // Remove initial spinner
             setIsSyncing(false);    // Stop refresh button animation
         }
     };
@@ -98,22 +98,38 @@ export default function Analytics() {
     }, [incidents]); // Only re-calculates if the incidents array changes
 
     // Logic to format data for the Pie Chart
-    const severityData = useMemo(() => [
-        { name: 'Critical', value: incidents.filter(i => (i.ai_insights?.[0]?.risk_score ?? 0) >= 8).length },
-        {
-            name: 'High', value: incidents.filter(i => {
-                const s = i.ai_insights?.[0]?.risk_score ?? 0;
-                return s >= 6 && s < 8;
-            }).length
-        },
-        {
-            name: 'Medium', value: incidents.filter(i => {
-                const s = i.ai_insights?.[0]?.risk_score ?? 0;
-                return s >= 4 && s < 6;
-            }).length
-        },
-        { name: 'Low', value: incidents.filter(i => (i.ai_insights?.[0]?.risk_score ?? 0) < 4).length },
-    ].filter(d => d.value > 0), [incidents]); // Filter out zeros to keep chart clean
+    // Logic to format data for the Pie Chart
+    const severityData = useMemo(() => {
+        // 1. Create a helper list of only incidents that actually have AI results
+        const analyzedIncidents = incidents.filter(i =>
+            i.ai_insights && i.ai_insights.length > 0 && i.ai_insights[0].risk_score !== undefined
+        );
+
+        return [
+            {
+                name: 'Critical',
+                value: analyzedIncidents.filter(i => i.ai_insights[0].risk_score >= 8).length
+            },
+            {
+                name: 'High',
+                value: analyzedIncidents.filter(i => {
+                    const s = i.ai_insights[0].risk_score;
+                    return s >= 6 && s < 8;
+                }).length
+            },
+            {
+                name: 'Medium',
+                value: analyzedIncidents.filter(i => {
+                    const s = i.ai_insights[0].risk_score;
+                    return s >= 4 && s < 6;
+                }).length
+            },
+            {
+                name: 'Low',
+                value: analyzedIncidents.filter(i => i.ai_insights[0].risk_score < 4).length
+            },
+        ].filter(d => d.value > 0);
+    }, [incidents]);
 
     // Logic to format data for the 7-day Trend Area Chart
     const trendData = useMemo(() => {

@@ -92,9 +92,11 @@ const formatTimestamp = (ts: any) => {
 
 // Returning full hardcoded strings for Tailwind compiler
 const getSeverityStyles = (score: number) => {
-    if (score >= 8) return "bg-red-100 text-red-700 border-red-300";
-    if (score >= 5) return "bg-orange-100 text-orange-700 border-orange-300";
-    return "bg-yellow-100 text-yellow-700 border-yellow-300";
+    if (score >= 8) return "bg-red-100 text-red-700 border-red-300";      // Critical
+    if (score >= 6) return "bg-orange-100 text-orange-700 border-orange-300"; // High
+    if (score >= 4) return "bg-yellow-100 text-yellow-700 border-yellow-300"; // Medium
+    if (score > 0) return "bg-green-100 text-green-700 border-green-300";   // Low (1-3)
+    return "bg-gray-100 text-gray-700 border-gray-300";                     // No Score
 };
 
 const getStatusStyles = (status: string) => {
@@ -109,7 +111,13 @@ if (loading) return <div className="p-10 text-center text-gray-400">Loading Inci
 if (selectedIncident) {
     const ai = selectedIncident.ai_insights?.[0];
     const riskScore = ai?.risk_score ?? 0;
-    const severityLabel = riskScore >= 8 ? "CRITICAL" : riskScore >= 5 ? "HIGH" : "MEDIUM";
+    const severityLabel = (score: number) => {
+        if (score >= 8) return "CRITICAL";
+        if (score >= 6) return "HIGH";
+        if (score >= 4) return "MEDIUM";
+        if (score > 0) return "LOW";
+        return "PENDING";
+    };
 
     return (
         <div className="p-8 space-y-6 bg-[#FDFCFE] min-h-screen">
@@ -172,7 +180,7 @@ if (selectedIncident) {
                     <div className={`self-end p-6 rounded-3xl text-center border-2 ${getSeverityStyles(riskScore)}`}>
                         <p className="text-[9px] uppercase font-black opacity-60 mb-1">Risk Score</p>
                         <p className="text-5xl font-black leading-none">{riskScore}</p>
-                        <p className="text-[10px] font-black mt-2 opacity-80">{severityLabel}</p>
+                        <p className="text-[10px] font-black mt-2 opacity-80">{severityLabel(riskScore)}</p>
                     </div>
                 </div>
             </div>
@@ -200,7 +208,7 @@ return (
                 <tbody className="divide-y-2 divide-gray-50">
                     {incidents.map((item) => {
                         const riskScore = item.ai_insights?.[0]?.risk_score ?? 0;
-                        const severityLabel = riskScore >= 8 ? "CRITICAL" : riskScore >= 5 ? "HIGH" : "MEDIUM";
+                        const severityLabel = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
 
                         return (
                             <tr key={item.id} className="hover:bg-gray-50/50 transition-all">
