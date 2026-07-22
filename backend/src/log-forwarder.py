@@ -19,11 +19,11 @@ db = firestore.client()
 
 
 
-local_time = datetime.datetime.now().isoformat() # timestamp for cleaned logs
+local_time = datetime.datetime.now().isoformat() # timestamp for clean logs
 
-# Directories for pc and laptop 
+# Directories for raw and clean logs
 src_dir = os.path.join(current_dir, "..", "raw-logs")
-dst_dir = os.path.join(current_dir, "..", "cleaned-logs") 
+dst_dir = os.path.join(current_dir, "..", "clean-logs") 
 
 
 
@@ -42,13 +42,13 @@ class ThreatDictionary:
         "../", "..\\", "etc/passwd", "windows/system32", "boot.ini", ".env", ".git" # Path Traversal / Info Leak
     ]
     
-    # 2. Authentication & Account Security (Brute Force / Credential Stuffing)
+    # 2. Authentication & Account Security (Brute Force)
     AUTH_ATTACKS = [
         "failed password", "invalid user", "authentication failure", "unauthorized",
         "login failed", "access denied", "bad password", "locked out", "user not found"
     ]
     
-    # 3. System & Malware Indicators (RCE / Post-Exploitation)
+    # 3. System & Malware Indicators (Post-Exploitation)
     SYSTEM_ATTACKS = [
         "rm -rf", "sudo", "chmod", "chown", "wget ", "curl ", "netcat", "nc -e", # Command Injection
         "compromised", "unexpected service", "malicious", "backdoor", "shell",
@@ -78,9 +78,12 @@ KNOWN_SAFE_PATTERNS = [
     "starting update inventory", "connection closed by authenticating user"
 ]
 
-# adding batching for brute force to reduce lines being parsed to llm
+# adding batching for brute force to reduce lines being parsed to llm at once
 BATCH_LIMIT = 20 # Number of suspicious lines to collect before calling LLM
+MAX_WAIT_SECONDS = 300 # 5 minutes 
+last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
+processed_files_announced = set() # stop the terminal spam for processed logs check
 
 def is_suspicious(line):
     line_lower = line.lower()
@@ -88,9 +91,11 @@ def is_suspicious(line):
     return any(keyword in line_lower for keyword in SUSPICIOUS_KEYWORDS)
 
 def is_noise(line):
-    return any(pattern in line.lower() for pattern in KNOWN_SAFE_PATTERNS)
+    line_lower = line.lower()
+    return any(pattern in line_lower for pattern in KNOWN_SAFE_PATTERNS)
 
 def process_batch(batch_list):
+    global last_batch_time
 
     # takes plantext data, snesds to llm as a group to save credits, then updates firestore
     print(f"\n--- [ACTION] BATCH OF {len(batch_list)} READY FOR LLM ---")
@@ -158,6 +163,9 @@ def process_batch(batch_list):
             print("MODEL NOT FOUND.")
         else:
             print(f"LLM Error: {e}")
+    # Timer Reset whenever a batch is processed
+    last_batch_time = time.time()
+    print("Batch processed and timer reset.")        
 
 def log_sanitiser(src_file):
     processed_events = [] # list to hold processed events
@@ -244,10 +252,6 @@ def log_sanitiser(src_file):
             # files remain a complete record of the whole log file
             processed_events.append(event)
 
-        if len(suspicious_buffer) > 0: # process remaining suspicious items
-            process_batch(suspicious_buffer)
-            suspicious_buffer = []
-
         # save dictionary as JSON for llm parsing 
         output_filename = file_name_only.replace(".log", ".json")
         dst_path = os.path.join(dst_dir, output_filename)
@@ -262,6 +266,7 @@ def log_sanitiser(src_file):
 
 # checks the directory for log files
 def log_watcher():
+    global suspicious_buffer, last_batch_time, processed_files_announced
 
     if not os.path.exists(src_dir) or not os.path.exists(dst_dir): # more efficient way to check the dirs exist using .exists instead
         sys.exit("Error: Directories missing.")
@@ -269,20 +274,47 @@ def log_watcher():
 
     print ("Checking for new logs...")
 
-    # Get all files in the source folder
-    all_files = os.listdir(src_dir)
+while True: # The script now runs continuously
+        # Get all files in the source folder
+        all_files = os.listdir(src_dir)
+        new_data_found = False
 
-    for file in all_files:
-        name, ext = os.path.splitext(file) # .split text to split the file as a more efficient way
-        if ext in acc_ext:
-            src_path = os.path.join(src_dir, file)
-            dst_json_path = os.path.join(dst_dir, name + ".json") # .join to put the ext on the new file
+        for file in all_files:
+            name, ext = os.path.splitext(file) # .split text to split the file as a more efficient way
+            if ext in acc_ext:
+                src_path = os.path.join(src_dir, file)
+                dst_json_path = os.path.join(dst_dir, name + ".json") # .join to put the ext on the new file
 
-            # more efficient way to prevent duplicated using .exists instead
-            if not os.path.exists(dst_json_path):
-                log_sanitiser(src_path)
-            else:
-                print(f"Skipping {file}: Already processed.")  
+                # more efficient way to prevent duplicated using .exists instead
+                if not os.path.exists(dst_json_path):
+                    log_sanitiser(src_path)
+                    new_data_found = True
+                    processed_files_announced.add(file) # log check to prevent spam
+                else:
+                    if file not in processed_files_announced:
+                        print(f"Skipping {file}: Already processed.")
+                        processed_files_announced.add(file)
+
+        # Check for Timeout
+        time_since_last_batch = time.time() - last_batch_time
+        
+        if len(suspicious_buffer) > 0 and time_since_last_batch >= MAX_WAIT_SECONDS: # moved buffer upload here to wait for more events to be added to buffer before upload
+                print(f"--- [TIMEOUT] {time_since_last_batch:.0f}s elapsed. Processing partial batch of {len(suspicious_buffer)} ---")
+                process_batch(suspicious_buffer)
+                suspicious_buffer = []
+        
+        # Sleep to prevent CPU hammering
+        if not new_data_found:
+            time.sleep(10) # Wait 10 seconds before checking for new files again
 
 if __name__ == "__main__":
-    log_watcher()
+    try:
+        log_watcher()
+    except KeyboardInterrupt:
+        print("\nScript stopped manually.")
+        # Final flush before the script actually stops
+        if len(suspicious_buffer) > 0:
+            print(f"--- [FINAL FLUSH] Processing {len(suspicious_buffer)} remaining logs before exit ---")
+            process_batch(suspicious_buffer)
+        print("Shutdown complete. Goodbye!")
+        sys.exit(0)
