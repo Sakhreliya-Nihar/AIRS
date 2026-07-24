@@ -94,6 +94,41 @@ def is_noise(line):
     line_lower = line.lower()
     return any(pattern in line_lower for pattern in KNOWN_SAFE_PATTERNS)
 
+def get_ai_persona():
+    """Fetches the technical level setting from Firestore and returns a specific system prompt."""
+    try:
+        # Fetch the config document in the React Settings page
+        doc = db.collection("settings").document("global_config").get()
+        if doc.exists:
+            level = doc.to_dict().get("tech_level", "business_owner")
+        else:
+            level = "business_owner"
+    except Exception as e:
+        print(f"Warning: Could not fetch settings ({e}). Defaulting to Business Owner.")
+        level = "business_owner"
+
+    # Define the 3 distinct personalities
+    prompts = {
+        "business_owner": (
+            "Analyze these logs for a non-technical business owner. "
+            "Avoid jargon. Focus on: Is this dangerous? Do I need to panic? "
+            "For the recommendation, tell them simply who to contact or if they can ignore it."
+        ),
+        "it_support": (
+            "Analyze these logs for a Junior IT Sysadmin. "
+            "Use standard IT terminology. Focus on: What service is failing? Is it a user error or a bug? "
+            "For the recommendation, suggest specific actions like 'Reset User Password', 'Check Firewall', or 'Restart Service'."
+        ),
+        "soc_analyst": (
+            "Analyze these logs for a Senior Security Analyst (SOC). "
+            "Be extremely technical. Focus on: Attack vectors, specific payload analysis (SQLi/XSS patterns), and Indicators of Compromise (IOCs). "
+            "For the recommendation, provide specific remediation commands (e.g., 'Block IP x via iptables', 'Patch CVE-2023-xxx')."
+        )
+    }
+    
+    return prompts.get(level, prompts["business_owner"])
+
+
 def process_batch(batch_list):
     global last_batch_time
 
@@ -103,6 +138,9 @@ def process_batch(batch_list):
     # Group the cleaned logs from memory
     combined_text = "\n".join([f"ID {item['event_id']}: {item['raw_sanitised_text']}" for item in batch_list])
 
+    persona_instruction = get_ai_persona() 
+    print(f"AI Persona Loaded: {persona_instruction[:50]}...") # Print first 50 chars to confirm
+
     try: 
 
         print("Waiting 60 seconds for API rate limits...")
@@ -110,7 +148,8 @@ def process_batch(batch_list):
 
         response = client.models.generate_content(
             model='gemini-2.5-flash-lite',
-            contents=f"""Analyze each of these logs individually for a small/medium business owner. Explain what happened in a clear, non-technical way and give a simple recommendation."
+            contents=f"""
+            {persona_instruction}
 
             LOGS:
             {combined_text}
