@@ -14,6 +14,8 @@
     "bootstrap": "^5.3.8",
     "fernet-browser": "^1.0.2",
     "firebase": "^12.6.0",
+    "jspdf": "^4.1.0",
+    "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
-import { Search, Filter, X, Calendar, AlertTriangle, Wifi, Shield, Network } from "lucide-react";
+import { Search, Filter, X, Calendar, AlertTriangle, Wifi, Shield, Network, FileDown } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 const API_KEY = import.meta.env.VITE_API_KEY
 
 /* ---------- Types ---------- */
@@ -47,13 +49,11 @@ export default function Incidents() {
     const [showFilters, setShowFilters] = useState(false);
 
     useEffect(() => {
-        // --- DEBUGGING: Check your browser console to see if the key exists ---
         console.log("Using API Key:", API_KEY);
         fetchIncidents();
     }, []);
 
     const fetchIncidents = () => {
-        // --- SYNTAX FIX: Headers must be inside the fetch options object ---
         fetch("http://localhost:8000/api/incidents", {
             headers: {
                 "X-API-Key": API_KEY
@@ -117,11 +117,244 @@ export default function Incidents() {
         } catch (err) { console.error(err); }
     };
 
-    // ... (Keep the rest of your filter logic / JSX exactly as it was) ...
-    // (I have omitted the rest of the file for brevity, but the logic above replaces your top section)
+    /* ---------- PDF Report Generation ---------- */
+    const generatePDFReport = () => {
+        try {
+            console.log("Starting PDF generation...");
 
-    // You need to paste the rest of your component here (Filter logic and Return statement)
-    // ...
+            const doc = new jsPDF();
+            const pageWidth = doc.internal.pageSize.width;
+            const pageHeight = doc.internal.pageSize.height;
+            const margin = 20;
+            let yPos = margin;
+
+            // Helper function to add page breaks
+            const checkPageBreak = (heightNeeded: number) => {
+                if (yPos + heightNeeded > pageHeight - margin) {
+                    doc.addPage();
+                    yPos = margin;
+                    return true;
+                }
+                return false;
+            };
+
+            // Header
+            doc.setFillColor(124, 58, 237); // Purple
+            doc.rect(0, 0, pageWidth, 35, 'F');
+
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(24);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Incident Report', margin, 20);
+
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+            const reportDate = new Date().toLocaleString();
+            doc.text(`Generated: ${reportDate}`, margin, 28);
+
+            yPos = 50;
+
+            // Summary Section
+            doc.setTextColor(0, 0, 0);
+            doc.setFontSize(16);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Executive Summary', margin, yPos);
+            yPos += 10;
+
+            const totalIncidents = filteredIncidents.length;
+            const criticalCount = filteredIncidents.filter(i => (i.ai_insights?.[0]?.risk_score ?? 0) >= 8).length;
+            const highCount = filteredIncidents.filter(i => {
+                const score = i.ai_insights?.[0]?.risk_score ?? 0;
+                return score >= 6 && score < 8;
+            }).length;
+            const resolvedCount = filteredIncidents.filter(i => i.analysis_status === 'resolved').length;
+            const pendingCount = filteredIncidents.filter(i => i.analysis_status === 'pending').length;
+
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Total Incidents: ${totalIncidents}`, margin, yPos);
+            yPos += 6;
+            doc.text(`Critical Severity: ${criticalCount}`, margin, yPos);
+            yPos += 6;
+            doc.text(`High Severity: ${highCount}`, margin, yPos);
+            yPos += 6;
+            doc.text(`Resolved: ${resolvedCount}`, margin, yPos);
+            yPos += 6;
+            doc.text(`Pending: ${pendingCount}`, margin, yPos);
+            yPos += 15;
+
+            // Incident Details Table
+            checkPageBreak(20);
+            doc.setFontSize(16);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Incident Details', margin, yPos);
+            yPos += 10;
+
+            // Prepare table data
+            const tableData = filteredIncidents.map(incident => {
+                const riskScore = incident.ai_insights?.[0]?.risk_score ?? 0;
+                const severity = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
+                const timestamp = formatTimestamp(incident.timestamp);
+                const summary = incident.ai_insights?.[0]?.summary || 'N/A';
+
+                return [
+                    incident.event.event_id.substring(0, 8),
+                    severity,
+                    incident.analysis_status.toUpperCase(),
+                    timestamp,
+                    summary.length > 50 ? summary.substring(0, 47) + '...' : summary
+                ];
+            });
+
+            autoTable(doc, {
+                startY: yPos,
+                head: [['ID', 'Severity', 'Status', 'Timestamp', 'Summary']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: {
+                    fillColor: [124, 58, 237],
+                    textColor: [255, 255, 255],
+                    fontStyle: 'bold',
+                    fontSize: 9
+                },
+                bodyStyles: {
+                    fontSize: 8,
+                    textColor: [50, 50, 50]
+                },
+                columnStyles: {
+                    0: { cellWidth: 20 },
+                    1: { cellWidth: 22 },
+                    2: { cellWidth: 22 },
+                    3: { cellWidth: 35 },
+                    4: { cellWidth: 'auto' }
+                },
+                alternateRowStyles: {
+                    fillColor: [245, 245, 245]
+                },
+                margin: { left: margin, right: margin }
+            });
+
+            yPos = (doc as any).lastAutoTable.finalY + 15;
+
+            // Detailed Incident Analysis (Top 5 Critical/High)
+            const criticalIncidents = filteredIncidents
+                .filter(i => (i.ai_insights?.[0]?.risk_score ?? 0) >= 6)
+                .slice(0, 5);
+
+            if (criticalIncidents.length > 0) {
+                checkPageBreak(20);
+                doc.setFontSize(16);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Critical Incident Analysis', margin, yPos);
+                yPos += 10;
+
+                criticalIncidents.forEach((incident) => {
+                    checkPageBreak(60);
+
+                    // Incident Header
+                    doc.setFillColor(240, 240, 240);
+                    doc.rect(margin, yPos - 5, pageWidth - 2 * margin, 12, 'F');
+
+                    doc.setFontSize(12);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setTextColor(124, 58, 237);
+                    doc.text(`Incident #${incident.event.event_id}`, margin + 3, yPos);
+                    yPos += 10;
+
+                    doc.setFontSize(9);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setTextColor(0, 0, 0);
+
+                    // Risk Score
+                    const riskScore = incident.ai_insights?.[0]?.risk_score ?? 0;
+                    doc.text(`Risk Score: ${riskScore}/10`, margin + 3, yPos);
+                    yPos += 6;
+
+                    // Timestamp
+                    doc.text(`Detected: ${formatTimestamp(incident.timestamp)}`, margin + 3, yPos);
+                    yPos += 6;
+
+                    // Summary
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Summary:', margin + 3, yPos);
+                    yPos += 5;
+                    doc.setFont('helvetica', 'normal');
+
+                    const summary = incident.ai_insights?.[0]?.summary || 'No summary available';
+                    const summaryLines = doc.splitTextToSize(summary, pageWidth - 2 * margin - 6);
+                    summaryLines.forEach((line: string) => {
+                        checkPageBreak(5);
+                        doc.text(line, margin + 3, yPos);
+                        yPos += 5;
+                    });
+                    yPos += 3;
+
+                    // Recommendation
+                    doc.setFont('helvetica', 'bold');
+                    doc.text('Recommendation:', margin + 3, yPos);
+                    yPos += 5;
+                    doc.setFont('helvetica', 'normal');
+
+                    const recommendation = incident.ai_insights?.[0]?.recommendation || 'No recommendation available';
+                    const recLines = doc.splitTextToSize(recommendation, pageWidth - 2 * margin - 6);
+                    recLines.forEach((line: string) => {
+                        checkPageBreak(5);
+                        doc.text(line, margin + 3, yPos);
+                        yPos += 5;
+                    });
+
+                    // User Notes
+                    if (incident.user_notes && incident.user_notes.length > 0) {
+                        yPos += 3;
+                        doc.setFont('helvetica', 'bold');
+                        doc.text('Notes:', margin + 3, yPos);
+                        yPos += 5;
+                        doc.setFont('helvetica', 'normal');
+
+                        incident.user_notes.forEach(note => {
+                            const noteLines = doc.splitTextToSize(`• ${note}`, pageWidth - 2 * margin - 6);
+                            noteLines.forEach((line: string) => {
+                                checkPageBreak(5);
+                                doc.text(line, margin + 3, yPos);
+                                yPos += 5;
+                            });
+                        });
+                    }
+
+                    yPos += 10;
+                });
+            }
+
+            // Footer on each page
+            const pageCount = doc.internal.pages.length - 1;
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFontSize(8);
+                doc.setTextColor(150, 150, 150);
+                doc.text(
+                    `Page ${i} of ${pageCount}`,
+                    pageWidth / 2,
+                    pageHeight - 10,
+                    { align: 'center' }
+                );
+                doc.text(
+                    'Incident Management Dashboard - Confidential',
+                    margin,
+                    pageHeight - 10
+                );
+            }
+
+            // Save PDF
+            const filename = `incident-report-${new Date().toISOString().split('T')[0]}.pdf`;
+            console.log("Saving PDF as:", filename);
+            doc.save(filename);
+            console.log("PDF generation complete!");
+
+        } catch (error) {
+            console.error("Error generating PDF:", error);
+            alert(`Failed to generate PDF report: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    };
 
     /* ---------- Filter and Search Logic ---------- */
     const getSeverityLabel = (score: number): string => {
@@ -185,20 +418,17 @@ export default function Incidents() {
         });
     }, [incidents, searchQuery, severityFilter, statusFilter, dateRange]);
 
-    /* ---------- Filter Toggle Handlers ---------- */
+    const activeFilterCount = severityFilter.length + statusFilter.length + (dateRange.start ? 1 : 0) + (dateRange.end ? 1 : 0);
+
     const toggleSeverityFilter = (severity: string) => {
         setSeverityFilter(prev =>
-            prev.includes(severity)
-                ? prev.filter(s => s !== severity)
-                : [...prev, severity]
+            prev.includes(severity) ? prev.filter(s => s !== severity) : [...prev, severity]
         );
     };
 
     const toggleStatusFilter = (status: string) => {
         setStatusFilter(prev =>
-            prev.includes(status)
-                ? prev.filter(s => s !== status)
-                : [...prev, status]
+            prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
         );
     };
 
@@ -209,410 +439,423 @@ export default function Incidents() {
         setDateRange({ start: "", end: "" });
     };
 
-    const activeFilterCount =
-        (searchQuery ? 1 : 0) +
-        severityFilter.length +
-        statusFilter.length +
-        (dateRange.start || dateRange.end ? 1 : 0);
-
-    /* ---------- Helpers ---------- */
-    const formatTimestamp = (ts: any) => {
-        if (!ts) return "No Date";
-        if (ts.seconds) return new Date(ts.seconds * 1000).toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-        const parsedDate = new Date(ts);
-        return !isNaN(parsedDate.getTime()) ? parsedDate.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : "Pending...";
+    const formatTimestamp = (timestamp: any) => {
+        if (!timestamp) return "N/A";
+        try {
+            const date = timestamp?.seconds
+                ? new Date(timestamp.seconds * 1000)
+                : new Date(timestamp);
+            return date.toLocaleString();
+        } catch {
+            return "Invalid Date";
+        }
     };
 
-    // Returning full hardcoded strings for Tailwind compiler
     const getSeverityStyles = (score: number) => {
-        if (score >= 8) return "bg-red-100 text-red-700 border-red-300";      // Critical
-        if (score >= 6) return "bg-orange-100 text-orange-700 border-orange-300"; // High
-        if (score >= 4) return "bg-yellow-100 text-yellow-700 border-yellow-300"; // Medium
-        if (score > 0) return "bg-green-100 text-green-700 border-green-300";   // Low (1-3)
-        return "bg-gray-100 text-gray-700 border-gray-300";                     // No Score
+        if (score >= 8) return "bg-red-100 border-red-300 text-red-700";
+        if (score >= 6) return "bg-orange-100 border-orange-300 text-orange-700";
+        if (score >= 4) return "bg-yellow-100 border-yellow-300 text-yellow-700";
+        if (score > 0) return "bg-green-100 border-green-300 text-green-700";
+        return "bg-gray-100 border-gray-300 text-gray-700";
     };
 
     const getStatusStyles = (status: string) => {
-        if (status === 'resolved') return "bg-green-100 text-green-700 border-green-300";
-        if (status === 'completed') return "bg-blue-100 text-blue-700 border-blue-300";
-        return "bg-gray-100 text-gray-700 border-gray-300";
+        switch (status) {
+            case "resolved":
+                return "bg-green-100 border-green-300 text-green-700";
+            case "completed":
+                return "bg-blue-100 border-blue-300 text-blue-700";
+            case "pending":
+                return "bg-yellow-100 border-yellow-300 text-yellow-700";
+            default:
+                return "bg-gray-100 border-gray-300 text-gray-700";
+        }
     };
 
-    if (loading) return <div className="p-10 text-center text-gray-400">Loading Incidents...</div>;
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-purple-600 mx-auto mb-4"></div>
+                    <p className="text-gray-600 font-bold">Loading incidents...</p>
+                </div>
+            </div>
+        );
+    }
 
-    /* ---------- DETAILED VIEW ---------- */
     if (selectedIncident) {
-        const ai = selectedIncident.ai_insights?.[0];
-        const riskScore = ai?.risk_score ?? 0;
-        const techDetails = selectedIncident.event.technical_details;
-
-        const severityLabel = (score: number) => {
-            if (score >= 8) return "CRITICAL";
-            if (score >= 6) return "HIGH";
-            if (score >= 4) return "MEDIUM";
-            if (score > 0) return "LOW";
-            return "PENDING";
-        };
+        const riskScore = selectedIncident.ai_insights?.[0]?.risk_score ?? 0;
+        const severityLabel = getSeverityLabel(riskScore);
 
         return (
-            <div className="p-8 space-y-6 bg-[#FDFCFE] min-h-screen">
-                <div className="flex justify-between items-center">
-                    <button onClick={() => setSelectedIncident(null)} className="text-gray-500 hover:text-gray-800 font-bold tracking-tighter uppercase text-xs">
-                        ← Back to Log
-                    </button>
-                    <button
-                        onClick={() => handleMarkResolved(selectedIncident.id)}
-                        className={`px-6 py-2 rounded-lg font-bold border-2 transition-all ${selectedIncident.analysis_status === 'resolved'
-                            ? "bg-green-100 border-green-400 text-green-700"
-                            : "bg-purple-600 border-purple-600 text-white hover:bg-purple-700"
-                            }`}
-                    >
-                        {selectedIncident.analysis_status === 'resolved' ? "RESOLVED" : "MARK RESOLVED"}
-                    </button>
-                </div>
+            <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-8">
+                <div className="max-w-5xl mx-auto">
+                    {/* Header */}
+                    <div className="mb-8 flex items-center justify-between">
+                        <button
+                            onClick={() => setSelectedIncident(null)}
+                            className="bg-white px-6 py-3 rounded-xl shadow-md border-2 border-gray-100 text-sm font-black text-gray-700 hover:bg-gray-50 transition-all"
+                        >
+                            ← Back to List
+                        </button>
+                        <h1 className="text-4xl font-black text-gray-800">
+                            Incident Investigation
+                        </h1>
+                    </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="space-y-6">
-                        {/* Technical Log Entry */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-50">
-                            <h3 className="font-black text-gray-400 text-[10px] uppercase tracking-widest mb-4">Technical Log Entry</h3>
-                            <pre className="text-[11px] font-mono bg-gray-900 text-green-400 p-5 rounded-xl overflow-auto max-h-64 shadow-inner">
-                                {selectedIncident.event.raw_sanitised_text}
-                            </pre>
+                    {/* Investigation Panel */}
+                    <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-100 p-8 space-y-8">
+                        {/* Incident Header */}
+                        <div className="flex items-start justify-between">
+                            <div>
+                                <h2 className="text-2xl font-black text-gray-800 mb-2">
+                                    #{selectedIncident.event.event_id}
+                                </h2>
+                                <p className="text-sm text-gray-500 font-bold">
+                                    {formatTimestamp(selectedIncident.timestamp)}
+                                </p>
+                            </div>
+                            <div className="flex gap-3">
+                                <span className={`px-4 py-2 rounded-xl text-xs font-black border-2 ${getSeverityStyles(riskScore)}`}>
+                                    {severityLabel.toUpperCase()}
+                                </span>
+                                <span className={`px-4 py-2 rounded-xl text-xs font-black border-2 uppercase ${getStatusStyles(selectedIncident.analysis_status)}`}>
+                                    {selectedIncident.analysis_status}
+                                </span>
+                            </div>
                         </div>
 
-                        {/* Technical Details - NEW SECTION */}
-                        {techDetails && (
-                            <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-50">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <Network className="text-indigo-600" size={16} />
-                                    <h3 className="font-black text-gray-400 text-[10px] uppercase tracking-widest">Network Intelligence</h3>
+                        {/* AI Analysis */}
+                        {selectedIncident.ai_insights && selectedIncident.ai_insights[0] && (
+                            <div className="space-y-6">
+                                {/* Risk Score */}
+                                <div>
+                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Risk Score</h3>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all ${riskScore >= 8 ? 'bg-red-500' :
+                                                        riskScore >= 6 ? 'bg-orange-500' :
+                                                            riskScore >= 4 ? 'bg-yellow-500' : 'bg-green-500'
+                                                    }`}
+                                                style={{ width: `${riskScore * 10}%` }}
+                                            ></div>
+                                        </div>
+                                        <span className="text-2xl font-black text-gray-800">{riskScore}/10</span>
+                                    </div>
                                 </div>
 
-                                <div className="space-y-4">
-                                    {/* External IPs */}
-                                    {techDetails.original_external_ips && techDetails.original_external_ips.length > 0 && (
-                                        <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-lg">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Shield className="text-red-600" size={14} />
-                                                <h4 className="text-[10px] font-black text-red-600 uppercase tracking-wider">External IPs (Threat Vectors)</h4>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {techDetails.original_external_ips.map((ip, idx) => (
-                                                    <span key={idx} className="px-3 py-1 bg-red-100 text-red-800 rounded-lg text-xs font-mono border border-red-300">
-                                                        {ip}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
+                                {/* Summary */}
+                                <div>
+                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">AI Summary</h3>
+                                    <p className="text-gray-700 leading-relaxed">{selectedIncident.ai_insights[0].summary}</p>
+                                </div>
 
-                                    {/* Internal IPs */}
-                                    {techDetails.original_internal_ips && techDetails.original_internal_ips.length > 0 && (
-                                        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-lg">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Wifi className="text-blue-600" size={14} />
-                                                <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-wider">Internal IPs (Your Network)</h4>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {techDetails.original_internal_ips.map((ip, idx) => (
-                                                    <span key={idx} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-mono border border-blue-300">
-                                                        {ip}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* MAC Addresses */}
-                                    {techDetails.original_macs && techDetails.original_macs.length > 0 && (
-                                        <div className="bg-purple-50 border-l-4 border-purple-400 p-4 rounded-lg">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Network className="text-purple-600" size={14} />
-                                                <h4 className="text-[10px] font-black text-purple-600 uppercase tracking-wider">MAC Addresses (Hardware)</h4>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {techDetails.original_macs.map((mac, idx) => (
-                                                    <span key={idx} className="px-3 py-1 bg-purple-100 text-purple-800 rounded-lg text-xs font-mono border border-purple-300">
-                                                        {mac}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Summary Stats */}
-                                    <div className="bg-gray-50 p-4 rounded-lg">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Total IPs</p>
-                                                <p className="text-xl font-black text-gray-700">{techDetails.ip_count || 0}</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Source File</p>
-                                                <p className="text-xs font-mono text-gray-600 truncate">{selectedIncident.event.original_filename}</p>
-                                            </div>
-                                        </div>
-                                    </div>
+                                {/* Recommendation */}
+                                <div>
+                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Recommendation</h3>
+                                    <p className="text-gray-700 leading-relaxed">{selectedIncident.ai_insights[0].recommendation}</p>
                                 </div>
                             </div>
                         )}
 
-                        {/* Analyst Notes */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-gray-50">
-                            <h3 className="font-black text-gray-400 text-[10px] uppercase tracking-widest mb-4">Analyst Notes</h3>
-                            <div className="space-y-2 mb-4">
-                                {selectedIncident.user_notes?.map((n, i) => (
-                                    <div key={i} className="text-sm p-3 bg-purple-50 rounded-lg border-l-4 border-purple-400 text-purple-900 italic">
-                                        "{n}"
-                                    </div>
-                                ))}
+                        {/* Raw Event Data */}
+                        <div>
+                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Raw Event Data</h3>
+                            <div className="bg-gray-50 rounded-xl p-4 border-2 border-gray-100">
+                                <p className="text-xs font-mono text-gray-600 whitespace-pre-wrap">{selectedIncident.event.raw_sanitised_text}</p>
                             </div>
-                            <textarea
-                                className="w-full border-2 border-gray-100 rounded-xl p-3 text-sm focus:border-purple-400 outline-none"
-                                rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add investigation details..."
-                            />
-                            <button onClick={() => handleSaveNote(selectedIncident.id)} className="mt-2 bg-purple-600 text-white px-8 py-2 rounded-xl text-xs font-black hover:bg-purple-700">
-                                SAVE NOTE
-                            </button>
                         </div>
-                    </div>
 
-                    {/* AI Intelligence Report */}
-                    <div className="bg-white p-8 rounded-2xl shadow-sm border-2 border-gray-50 flex flex-col min-h-[500px]">
-                        <h3 className="font-black text-gray-400 text-[10px] uppercase tracking-widest mb-8">AI Intelligence Report</h3>
-                        <div className="space-y-8 flex-grow">
+                        {/* Technical Details */}
+                        {selectedIncident.event.technical_details && (
                             <div>
-                                <h4 className="text-[10px] font-bold text-gray-400 uppercase mb-2">Threat Analysis</h4>
-                                <p className="text-gray-800 text-sm leading-relaxed font-medium bg-gray-50/50 p-4 rounded-xl border border-gray-100">{ai?.summary}</p>
+                                <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <Network size={16} />
+                                    Technical Details
+                                </h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    {selectedIncident.event.technical_details.original_internal_ips && (
+                                        <div className="bg-blue-50 rounded-xl p-4 border-2 border-blue-100">
+                                            <p className="text-xs font-black text-blue-600 mb-2">Internal IPs</p>
+                                            <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_internal_ips.join(', ')}</p>
+                                        </div>
+                                    )}
+                                    {selectedIncident.event.technical_details.original_external_ips && (
+                                        <div className="bg-purple-50 rounded-xl p-4 border-2 border-purple-100">
+                                            <p className="text-xs font-black text-purple-600 mb-2">External IPs</p>
+                                            <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_external_ips.join(', ')}</p>
+                                        </div>
+                                    )}
+                                    {selectedIncident.event.technical_details.original_macs && (
+                                        <div className="bg-green-50 rounded-xl p-4 border-2 border-green-100">
+                                            <p className="text-xs font-black text-green-600 mb-2">MAC Addresses</p>
+                                            <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_macs.join(', ')}</p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <div>
-                                <h4 className="text-[10px] font-bold text-gray-400 uppercase mb-2">Recommendation</h4>
-                                <p className="text-gray-800 text-sm leading-relaxed font-medium bg-gray-50/50 p-4 rounded-xl border border-gray-100">{ai?.recommendation}</p>
+                        )}
+
+                        {/* User Notes */}
+                        <div>
+                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Investigation Notes</h3>
+                            {selectedIncident.user_notes && selectedIncident.user_notes.length > 0 ? (
+                                <div className="space-y-2 mb-4">
+                                    {selectedIncident.user_notes.map((note, idx) => (
+                                        <div key={idx} className="bg-yellow-50 border-2 border-yellow-100 rounded-xl p-3">
+                                            <p className="text-sm text-gray-700">{note}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-sm text-gray-400 italic mb-4">No notes yet</p>
+                            )}
+
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={note}
+                                    onChange={(e) => setNote(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && handleSaveNote(selectedIncident.id)}
+                                    placeholder="Add investigation note..."
+                                    className="flex-1 px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:border-purple-400 outline-none"
+                                />
+                                <button
+                                    onClick={() => handleSaveNote(selectedIncident.id)}
+                                    className="bg-purple-600 text-white px-6 py-3 rounded-xl text-sm font-black hover:bg-purple-700 transition-all"
+                                >
+                                    Add Note
+                                </button>
                             </div>
                         </div>
-                        <div className={`self-end p-6 rounded-3xl text-center border-2 ${getSeverityStyles(riskScore)}`}>
-                            <p className="text-[9px] uppercase font-black opacity-60 mb-1">Risk Score</p>
-                            <p className="text-5xl font-black leading-none">{riskScore}</p>
-                            <p className="text-[10px] font-black mt-2 opacity-80">{severityLabel(riskScore)}</p>
-                        </div>
+
+                        {/* Actions */}
+                        {selectedIncident.analysis_status !== 'resolved' && (
+                            <div className="pt-6 border-t-2 border-gray-100">
+                                <button
+                                    onClick={() => handleMarkResolved(selectedIncident.id)}
+                                    className="w-full bg-green-600 text-white py-4 rounded-xl font-black hover:bg-green-700 transition-all"
+                                >
+                                    Mark as Resolved
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
         );
     }
 
-    /* ---------- TABLE VIEW ---------- */
     return (
-        <div className="p-8 space-y-6 bg-[#FDFCFE] min-h-screen">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <h2 className="text-3xl font-black text-gray-800 tracking-tighter">INCIDENT LOG</h2>
-
-                {/* Active filter count badge */}
-                {activeFilterCount > 0 && (
-                    <div className="flex items-center gap-2">
-                        <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-black">
-                            {activeFilterCount} {activeFilterCount === 1 ? 'Filter' : 'Filters'} Active
-                        </span>
-                        <button
-                            onClick={clearAllFilters}
-                            className="text-xs font-bold text-gray-500 hover:text-gray-700 underline"
-                        >
-                            Clear All
-                        </button>
+        <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-8">
+            <div className="max-w-7xl mx-auto space-y-8">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h1 className="text-4xl font-black text-gray-800 mb-2">
+                            Security Incidents
+                        </h1>
+                        <p className="text-gray-500 font-bold">Monitor and investigate security events</p>
                     </div>
-                )}
-            </div>
-
-            {/* Search and Filter Bar */}
-            <div className="space-y-4">
-                <div className="flex flex-col md:flex-row gap-3">
-                    {/* Search Input */}
-                    <div className="flex-1 relative">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                        <input
-                            type="text"
-                            placeholder="Search by ID, keywords, or summary..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full pl-12 pr-10 py-3 border-2 border-gray-100 rounded-xl text-sm focus:border-purple-400 outline-none bg-white"
-                        />
-                        {searchQuery && (
-                            <button
-                                onClick={() => setSearchQuery("")}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                            >
-                                <X size={18} />
-                            </button>
-                        )}
-                    </div>
-
-                    {/* Filter Toggle Button */}
                     <button
-                        onClick={() => setShowFilters(!showFilters)}
-                        className={`px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${showFilters || activeFilterCount > 0
-                            ? 'bg-purple-600 text-white'
-                            : 'bg-white border-2 border-gray-100 text-gray-700 hover:border-purple-400'
-                            }`}
+                        onClick={generatePDFReport}
+                        className="bg-purple-600 text-white px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-purple-700 transition-all shadow-lg"
                     >
-                        <Filter size={18} />
-                        Filters
-                        {activeFilterCount > 0 && (
-                            <span className="bg-white text-purple-600 rounded-full w-5 h-5 flex items-center justify-center text-xs font-black">
-                                {activeFilterCount}
-                            </span>
-                        )}
+                        <FileDown size={18} />
+                        Generate Report
                     </button>
                 </div>
 
-                {/* Expanded Filter Panel */}
-                {showFilters && (
-                    <div className="bg-white p-6 rounded-2xl border-2 border-gray-100 space-y-6">
-                        {/* Severity Filters */}
-                        <div>
-                            <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">Severity Level</h4>
-                            <div className="flex flex-wrap gap-2">
-                                {['Critical', 'High', 'Medium', 'Low', 'Pending'].map((severity) => (
-                                    <button
-                                        key={severity}
-                                        onClick={() => toggleSeverityFilter(severity)}
-                                        className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all ${severityFilter.includes(severity)
-                                            ? severity === 'Critical' ? 'bg-red-100 border-red-300 text-red-700'
-                                                : severity === 'High' ? 'bg-orange-100 border-orange-300 text-orange-700'
-                                                    : severity === 'Medium' ? 'bg-yellow-100 border-yellow-300 text-yellow-700'
-                                                        : severity === 'Low' ? 'bg-green-100 border-green-300 text-green-700'
+                {/* Search and Filters */}
+                <div className="space-y-4">
+                    <div className="flex gap-4">
+                        {/* Search Bar */}
+                        <div className="flex-1 relative">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                            <input
+                                type="text"
+                                placeholder="Search incidents by ID, summary, or notes..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full pl-12 pr-10 py-3 border-2 border-gray-100 rounded-xl text-sm focus:border-purple-400 outline-none bg-white"
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery("")}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                >
+                                    <X size={18} />
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Filter Toggle Button */}
+                        <button
+                            onClick={() => setShowFilters(!showFilters)}
+                            className={`px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${showFilters || activeFilterCount > 0
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-white border-2 border-gray-100 text-gray-700 hover:border-purple-400'
+                                }`}
+                        >
+                            <Filter size={18} />
+                            Filters
+                            {activeFilterCount > 0 && (
+                                <span className="bg-white text-purple-600 rounded-full w-5 h-5 flex items-center justify-center text-xs font-black">
+                                    {activeFilterCount}
+                                </span>
+                            )}
+                        </button>
+                    </div>
+
+                    {/* Expanded Filter Panel */}
+                    {showFilters && (
+                        <div className="bg-white p-6 rounded-2xl border-2 border-gray-100 space-y-6">
+                            {/* Severity Filters */}
+                            <div>
+                                <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">Severity Level</h4>
+                                <div className="flex flex-wrap gap-2">
+                                    {['Critical', 'High', 'Medium', 'Low', 'Pending'].map((severity) => (
+                                        <button
+                                            key={severity}
+                                            onClick={() => toggleSeverityFilter(severity)}
+                                            className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all ${severityFilter.includes(severity)
+                                                    ? severity === 'Critical' ? 'bg-red-100 border-red-300 text-red-700'
+                                                        : severity === 'High' ? 'bg-orange-100 border-orange-300 text-orange-700'
+                                                            : severity === 'Medium' ? 'bg-yellow-100 border-yellow-300 text-yellow-700'
+                                                                : severity === 'Low' ? 'bg-green-100 border-green-300 text-green-700'
+                                                                    : 'bg-gray-100 border-gray-300 text-gray-700'
+                                                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                                                }`}
+                                        >
+                                            {severity}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Status Filters */}
+                            <div>
+                                <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">Status</h4>
+                                <div className="flex flex-wrap gap-2">
+                                    {['completed', 'pending', 'resolved', 'ignored_low_risk'].map((status) => (
+                                        <button
+                                            key={status}
+                                            onClick={() => toggleStatusFilter(status)}
+                                            className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all uppercase ${statusFilter.includes(status)
+                                                    ? status === 'resolved' ? 'bg-green-100 border-green-300 text-green-700'
+                                                        : status === 'completed' ? 'bg-blue-100 border-blue-300 text-blue-700'
                                                             : 'bg-gray-100 border-gray-300 text-gray-700'
-                                            : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
-                                            }`}
-                                    >
-                                        {severity}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Status Filters */}
-                        <div>
-                            <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">Status</h4>
-                            <div className="flex flex-wrap gap-2">
-                                {['completed', 'pending', 'resolved', 'ignored_low_risk'].map((status) => (
-                                    <button
-                                        key={status}
-                                        onClick={() => toggleStatusFilter(status)}
-                                        className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all uppercase ${statusFilter.includes(status)
-                                            ? status === 'resolved' ? 'bg-green-100 border-green-300 text-green-700'
-                                                : status === 'completed' ? 'bg-blue-100 border-blue-300 text-blue-700'
-                                                    : 'bg-gray-100 border-gray-300 text-gray-700'
-                                            : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
-                                            }`}
-                                    >
-                                        {status.replace('_', ' ')}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Date Range Filter */}
-                        <div>
-                            <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                <Calendar size={14} />
-                                Date Range
-                            </h4>
-                            <div className="flex flex-col md:flex-row gap-3">
-                                <div className="flex-1">
-                                    <label className="text-xs font-bold text-gray-500 mb-1 block">From</label>
-                                    <input
-                                        type="date"
-                                        value={dateRange.start}
-                                        onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                                        className="w-full px-3 py-2 border-2 border-gray-100 rounded-lg text-sm focus:border-purple-400 outline-none"
-                                    />
+                                                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                                                }`}
+                                        >
+                                            {status.replace('_', ' ')}
+                                        </button>
+                                    ))}
                                 </div>
-                                <div className="flex-1">
-                                    <label className="text-xs font-bold text-gray-500 mb-1 block">To</label>
-                                    <input
-                                        type="date"
-                                        value={dateRange.end}
-                                        onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                                        className="w-full px-3 py-2 border-2 border-gray-100 rounded-lg text-sm focus:border-purple-400 outline-none"
-                                    />
+                            </div>
+
+                            {/* Date Range Filter */}
+                            <div>
+                                <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                    <Calendar size={14} />
+                                    Date Range
+                                </h4>
+                                <div className="flex flex-col md:flex-row gap-3">
+                                    <div className="flex-1">
+                                        <label className="text-xs font-bold text-gray-500 mb-1 block">From</label>
+                                        <input
+                                            type="date"
+                                            value={dateRange.start}
+                                            onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                                            className="w-full px-3 py-2 border-2 border-gray-100 rounded-lg text-sm focus:border-purple-400 outline-none"
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="text-xs font-bold text-gray-500 mb-1 block">To</label>
+                                        <input
+                                            type="date"
+                                            value={dateRange.end}
+                                            onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                                            className="w-full px-3 py-2 border-2 border-gray-100 rounded-lg text-sm focus:border-purple-400 outline-none"
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                )}
-            </div>
+                    )}
+                </div>
 
-            {/* Results Summary */}
-            <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-gray-500">
-                    Showing <span className="text-purple-600 font-black">{filteredIncidents.length}</span> of <span className="font-black">{incidents.length}</span> incidents
-                </p>
-            </div>
+                {/* Results Summary */}
+                <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold text-gray-500">
+                        Showing <span className="text-purple-600 font-black">{filteredIncidents.length}</span> of <span className="font-black">{incidents.length}</span> incidents
+                    </p>
+                </div>
 
-            {/* Table */}
-            <div className="bg-white rounded-3xl shadow-sm border-2 border-gray-50 overflow-hidden">
-                {filteredIncidents.length === 0 ? (
-                    <div className="p-12 text-center">
-                        <AlertTriangle className="mx-auto mb-4 text-gray-300" size={48} />
-                        <h3 className="text-lg font-black text-gray-400 mb-2">No Incidents Found</h3>
-                        <p className="text-sm text-gray-400">Try adjusting your search or filter criteria</p>
-                        {activeFilterCount > 0 && (
-                            <button
-                                onClick={clearAllFilters}
-                                className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-xl text-xs font-black hover:bg-purple-700"
-                            >
-                                Clear All Filters
-                            </button>
-                        )}
-                    </div>
-                ) : (
-                    <table className="w-full text-left">
-                        <thead>
-                            <tr className="bg-gray-100/50 border-b-2 border-gray-50">
-                                <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">ID</th>
-                                <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Severity</th>
-                                <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
-                                <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Time</th>
-                                <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Event Summary</th>
-                                <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Investigation</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y-2 divide-gray-50">
-                            {filteredIncidents.map((item) => {
-                                const riskScore = item.ai_insights?.[0]?.risk_score ?? 0;
-                                const severityLabel = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
+                {/* Table */}
+                <div className="bg-white rounded-3xl shadow-sm border-2 border-gray-50 overflow-hidden">
+                    {filteredIncidents.length === 0 ? (
+                        <div className="p-12 text-center">
+                            <AlertTriangle className="mx-auto mb-4 text-gray-300" size={48} />
+                            <h3 className="text-lg font-black text-gray-400 mb-2">No Incidents Found</h3>
+                            <p className="text-sm text-gray-400">Try adjusting your search or filter criteria</p>
+                            {activeFilterCount > 0 && (
+                                <button
+                                    onClick={clearAllFilters}
+                                    className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-xl text-xs font-black hover:bg-purple-700"
+                                >
+                                    Clear All Filters
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <table className="w-full text-left">
+                            <thead>
+                                <tr className="bg-gray-100/50 border-b-2 border-gray-50">
+                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">ID</th>
+                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Severity</th>
+                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
+                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Time</th>
+                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Event Summary</th>
+                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Investigation</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y-2 divide-gray-50">
+                                {filteredIncidents.map((item) => {
+                                    const riskScore = item.ai_insights?.[0]?.risk_score ?? 0;
+                                    const severityLabel = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
 
-                                return (
-                                    <tr key={item.id} className="hover:bg-gray-50/50 transition-all">
-                                        <td className="p-5 text-xs font-mono text-gray-300">#{item.event.event_id}</td>
-                                        <td className="p-5">
-                                            <span className={`px-3 py-1 rounded-lg text-[9px] font-black border-2 ${getSeverityStyles(riskScore)}`}>
-                                                {severityLabel}
-                                            </span>
-                                        </td>
-                                        <td className="p-5">
-                                            <span className={`px-3 py-1 rounded-lg text-[9px] font-black border-2 uppercase ${getStatusStyles(item.analysis_status)}`}>
-                                                {item.analysis_status}
-                                            </span>
-                                        </td>
-                                        <td className="p-5 text-xs font-bold text-gray-500">{formatTimestamp(item.timestamp)}</td>
-                                        <td className="p-5 text-[11px] text-gray-400 font-mono truncate max-w-[250px] italic">{item.event.raw_sanitised_text}</td>
-                                        <td className="p-5 text-center">
-                                            <button
-                                                onClick={() => setSelectedIncident(item)}
-                                                className="bg-purple-600 text-white px-5 py-2 rounded-xl text-[10px] font-black hover:bg-purple-700 shadow-md transition-all active:scale-95"
-                                            >
-                                                INVESTIGATE
-                                            </button>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                )}
+                                    return (
+                                        <tr key={item.id} className="hover:bg-gray-50/50 transition-all">
+                                            <td className="p-5 text-xs font-mono text-gray-300">#{item.event.event_id}</td>
+                                            <td className="p-5">
+                                                <span className={`px-3 py-1 rounded-lg text-[9px] font-black border-2 ${getSeverityStyles(riskScore)}`}>
+                                                    {severityLabel}
+                                                </span>
+                                            </td>
+                                            <td className="p-5">
+                                                <span className={`px-3 py-1 rounded-lg text-[9px] font-black border-2 uppercase ${getStatusStyles(item.analysis_status)}`}>
+                                                    {item.analysis_status}
+                                                </span>
+                                            </td>
+                                            <td className="p-5 text-xs font-bold text-gray-500">{formatTimestamp(item.timestamp)}</td>
+                                            <td className="p-5 text-[11px] text-gray-400 font-mono truncate max-w-[250px] italic">{item.event.raw_sanitised_text}</td>
+                                            <td className="p-5 text-center">
+                                                <button
+                                                    onClick={() => setSelectedIncident(item)}
+                                                    className="bg-purple-600 text-white px-5 py-2 rounded-xl text-[10px] font-black hover:bg-purple-700 shadow-md transition-all active:scale-95"
+                                                >
+                                                    INVESTIGATE
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
             </div>
         </div>
     );
-}
