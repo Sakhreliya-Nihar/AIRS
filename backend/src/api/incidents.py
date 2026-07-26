@@ -3,6 +3,7 @@ from services.firestore import get_incidents, db # Import db from your firestore
 from pydantic import BaseModel
 import firebase_admin.firestore as firestore # Needed for firestore.ArrayUnion
 
+from security.crypto import encrypt_payload
 router = APIRouter(prefix="/api/incidents", tags=["Incidents"]) # every route defined will start with this path. 
 
 
@@ -26,9 +27,13 @@ def resolve_incident(doc_id: str):
 @router.post("/{doc_id}/notes")
 def add_note(doc_id: str, request: NoteRequest):
     try:
+
+        # Encrypt the plain text note first
+        encrypted_note = encrypt_payload(request.note)
+
         # Use ArrayUnion so we don't overwrite previous notes
         db.collection("incidents").document(doc_id).update({
-            "user_notes": firestore.ArrayUnion([request.note])
+            "user_notes": firestore.ArrayUnion([encrypted_note])
         })
         return {"status": "success"}
     except Exception as e:

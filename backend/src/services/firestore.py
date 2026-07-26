@@ -10,7 +10,6 @@ if not firebase_admin._apps:
 
 db = firestore.client() # connecting to firestore 
 
-
 def get_incidents(): 
     incidents = []
 
@@ -18,13 +17,14 @@ def get_incidents():
 
     for doc in docs:
         data = doc.to_dict()
-        # 1. Decrypt the main log data (this is usually a string)
+
+        # Decrypt the main log data (usually a string)
         decrypted_event = decrypt_payload(data["data"])
         
         if decrypted_event is None:
             continue
 
-        # 2. Handle ai_insights (stored as a list)
+        # Handle ai_insights (stored as a list)
 
         ai_insights = None
         raw_insights = data.get("ai_insights")
@@ -32,11 +32,17 @@ def get_incidents():
         if raw_insights:
             # Check if it's a list and has at least one item
             if isinstance(raw_insights, list) and len(raw_insights) > 0:
-                # Decrypt the FIRST string in the list
+                # Decrypt the first string list
                 ai_insights = [decrypt_payload(raw_insights[0])]
             elif isinstance(raw_insights, str):
                 # Fallback for old data stored as a single string
                 ai_insights = [decrypt_payload(raw_insights)]
+
+        raw_notes = data.get("user_notes", [])
+        # We use a check to ensure we don't try to decrypt None
+        decrypted_notes = [
+            decrypt_payload(n) for n in raw_notes if n is not None
+            ]        
 
         incidents.append({
             "id": doc.id,
@@ -44,7 +50,7 @@ def get_incidents():
             "ai_insights": ai_insights,
             "analysis_status": data.get("analysis_status", "pending"),
             "timestamp": data.get("timestamp"),
-            "user_notes": data.get("user_notes", []) # Ensure notes don't break if missing
+            "user_notes": decrypted_notes 
         })
 
     return incidents
