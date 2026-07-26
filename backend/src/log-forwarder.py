@@ -1,4 +1,4 @@
-import os, datetime, sys, json, re, uuid, firebase_admin, time
+import os, datetime, sys, json, re, uuid, firebase_admin, time, hashlib
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
 from google import genai
@@ -84,6 +84,12 @@ MAX_WAIT_SECONDS = 300 # 5 minutes
 last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
 processed_files_announced = set() # stop the terminal spam for processed logs check
+
+def generate_integrity_hash(event_id, text, timestamp):
+    """Creates a SHA-256 hash of the core event data to ensure integrity."""
+    # We combine the unique ID, the log text, and the timestamp string
+    combined_string = f"{event_id}|{text}|{timestamp}"
+    return hashlib.sha256(combined_string.encode()).hexdigest()
 
 def is_suspicious(line):
     line_lower = line.lower()
@@ -258,6 +264,15 @@ def log_sanitiser(src_file):
                 "analysis_status": analysis_status, # filtered ready for LLm later
                 "is_suspicious": suspicious_flag # flags any suspicious threats that may be worth parsing to llm
             }
+
+                        integrity_hash = generate_integrity_hash(
+                event["event_id"], 
+                event["raw_sanitised_text"], 
+                event["local_timestamp"]
+            )
+
+            # Add the hash to the event object so it's saved locally too
+            event["integrity_hash"] = integrity_hash
  
             # batching logic
             if event["is_suspicious"]:
@@ -270,6 +285,7 @@ def log_sanitiser(src_file):
                 encrypted_payload = {
                     "data": encrypted_token,
                     "is_encrypted": True,
+                    "integrity_hash": integrity_hash,
                     "timestamp": firestore.SERVER_TIMESTAMP # used for sorting
                 }
                 # Push to Firestore

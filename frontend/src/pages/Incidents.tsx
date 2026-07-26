@@ -33,6 +33,7 @@ interface Incident {
     analysis_status: "completed" | "pending" | "ignored_low_risk" | "resolved";
     timestamp?: any;
     user_notes?: string[];
+    is_verified?: boolean;
 }
 
 export default function Incidents() {
@@ -194,12 +195,14 @@ export default function Incidents() {
             const tableData = filteredIncidents.map(incident => {
                 const riskScore = incident.ai_insights?.[0]?.risk_score ?? 0;
                 const severity = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
+                const integrity = incident.is_verified ? "VERIFIED" : "TAMPERED";
                 const timestamp = formatTimestamp(incident.timestamp);
                 const summary = incident.ai_insights?.[0]?.summary || 'N/A';
 
                 return [
                     incident.event.event_id.substring(0, 8),
                     severity,
+                    integrity,
                     incident.analysis_status.toUpperCase(),
                     timestamp,
                     summary.length > 50 ? summary.substring(0, 47) + '...' : summary
@@ -208,7 +211,7 @@ export default function Incidents() {
 
             autoTable(doc, {
                 startY: yPos,
-                head: [['ID', 'Severity', 'Status', 'Timestamp', 'Summary']],
+                head: [['ID', 'Severity', 'Integrity', 'Status', 'Timestamp', 'Summary']],
                 body: tableData,
                 theme: 'grid',
                 headStyles: {
@@ -505,6 +508,21 @@ export default function Incidents() {
 
                     {/* Investigation Panel */}
                     <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-100 p-8 space-y-8">
+                        <div className={`p-4 rounded-2xl border-2 flex items-center gap-3 ${selectedIncident.is_verified
+                                ? "bg-green-50 border-green-100 text-green-700"
+                                : "bg-red-50 border-red-100 text-red-700"
+                            }`}>
+                            {selectedIncident.is_verified ? (
+                                <Shield size={20} />
+                            ) : (
+                                <AlertTriangle size={20} className="animate-pulse" />
+                            )}
+                            <span className="text-xs font-black uppercase tracking-widest">
+                                {selectedIncident.is_verified
+                                    ? "Integrity Verified: Data is cryptographically authentic"
+                                    : "Security Alert: Log integrity check failed - Potential tampering detected"}
+                            </span>
+                        </div>
                         {/* Incident Header */}
                         <div className="flex items-start justify-between">
                             <div>
@@ -535,8 +553,8 @@ export default function Incidents() {
                                         <div className="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden">
                                             <div
                                                 className={`h-full rounded-full transition-all ${riskScore >= 8 ? 'bg-red-500' :
-                                                        riskScore >= 6 ? 'bg-orange-500' :
-                                                            riskScore >= 4 ? 'bg-yellow-500' : 'bg-green-500'
+                                                    riskScore >= 6 ? 'bg-orange-500' :
+                                                        riskScore >= 4 ? 'bg-yellow-500' : 'bg-green-500'
                                                     }`}
                                                 style={{ width: `${riskScore * 10}%` }}
                                             ></div>
@@ -694,8 +712,8 @@ export default function Incidents() {
                         <button
                             onClick={() => setShowFilters(!showFilters)}
                             className={`px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${showFilters || activeFilterCount > 0
-                                    ? 'bg-purple-600 text-white'
-                                    : 'bg-white border-2 border-gray-100 text-gray-700 hover:border-purple-400'
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-white border-2 border-gray-100 text-gray-700 hover:border-purple-400'
                                 }`}
                         >
                             <Filter size={18} />
@@ -720,12 +738,12 @@ export default function Incidents() {
                                             key={severity}
                                             onClick={() => toggleSeverityFilter(severity)}
                                             className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all ${severityFilter.includes(severity)
-                                                    ? severity === 'Critical' ? 'bg-red-100 border-red-300 text-red-700'
-                                                        : severity === 'High' ? 'bg-orange-100 border-orange-300 text-orange-700'
-                                                            : severity === 'Medium' ? 'bg-yellow-100 border-yellow-300 text-yellow-700'
-                                                                : severity === 'Low' ? 'bg-green-100 border-green-300 text-green-700'
-                                                                    : 'bg-gray-100 border-gray-300 text-gray-700'
-                                                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                                                ? severity === 'Critical' ? 'bg-red-100 border-red-300 text-red-700'
+                                                    : severity === 'High' ? 'bg-orange-100 border-orange-300 text-orange-700'
+                                                        : severity === 'Medium' ? 'bg-yellow-100 border-yellow-300 text-yellow-700'
+                                                            : severity === 'Low' ? 'bg-green-100 border-green-300 text-green-700'
+                                                                : 'bg-gray-100 border-gray-300 text-gray-700'
+                                                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
                                                 }`}
                                         >
                                             {severity}
@@ -743,10 +761,10 @@ export default function Incidents() {
                                             key={status}
                                             onClick={() => toggleStatusFilter(status)}
                                             className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all uppercase ${statusFilter.includes(status)
-                                                    ? status === 'resolved' ? 'bg-green-100 border-green-300 text-green-700'
-                                                        : status === 'completed' ? 'bg-blue-100 border-blue-300 text-blue-700'
-                                                            : 'bg-gray-100 border-gray-300 text-gray-700'
-                                                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                                                ? status === 'resolved' ? 'bg-green-100 border-green-300 text-green-700'
+                                                    : status === 'completed' ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                                        : 'bg-gray-100 border-gray-300 text-gray-700'
+                                                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
                                                 }`}
                                         >
                                             {status.replace('_', ' ')}
@@ -815,6 +833,7 @@ export default function Incidents() {
                                 <tr className="bg-gray-100/50 border-b-2 border-gray-50">
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">ID</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Severity</th>
+                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Integrity</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Time</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Event Summary</th>
@@ -833,6 +852,19 @@ export default function Incidents() {
                                                 <span className={`px-3 py-1 rounded-lg text-[9px] font-black border-2 ${getSeverityStyles(riskScore)}`}>
                                                     {severityLabel}
                                                 </span>
+                                            </td>
+                                            <td className="p-5">
+                                                {item.is_verified ? (
+                                                    <div className="flex items-center gap-2 text-green-600">
+                                                        <Shield size={16} />
+                                                        <span className="text-[10px] font-black uppercase">Verified</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-2 text-red-500 animate-pulse">
+                                                        <AlertTriangle size={16} />
+                                                        <span className="text-[10px] font-black uppercase">Tampered</span>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="p-5">
                                                 <span className={`px-3 py-1 rounded-lg text-[9px] font-black border-2 uppercase ${getStatusStyles(item.analysis_status)}`}>

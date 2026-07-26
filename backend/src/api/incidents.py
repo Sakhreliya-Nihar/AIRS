@@ -38,3 +38,4 @@ def add_note(doc_id: str, request: NoteRequest):
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
