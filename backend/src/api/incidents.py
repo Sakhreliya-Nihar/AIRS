@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException # Add HTTPException
+from fastapi import APIRouter, HTTPException, Body # Add HTTPException
 from services.firestore import get_incidents, db # Import db from your firestore service
 from pydantic import BaseModel
 import firebase_admin.firestore as firestore # Needed for firestore.ArrayUnion
@@ -39,3 +39,13 @@ def add_note(doc_id: str, request: NoteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.patch("/api/incidents/{doc_id}/mitigate")
+async def update_mitigation_progress(doc_id: str, completed_steps: list[int] = Body(..., embed=True)):
+    """Saves the list of checked boxes (by index) to Firestore"""
+    try:
+        doc_ref = db.collection("incidents").document(doc_id)
+        # saves an array of integers representing the indexes of checked items (e.g., [0, 2])
+        doc_ref.update({"completed_steps": completed_steps})
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

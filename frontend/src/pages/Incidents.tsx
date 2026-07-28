@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { Search, Filter, X, Calendar, AlertTriangle, Wifi, Shield, Network, FileDown } from "lucide-react";
+import { Search, Filter, X, Calendar, AlertTriangle, Shield, Network, FileDown, ClipboardList, ShieldCheck } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 const API_KEY = import.meta.env.VITE_API_KEY
@@ -7,7 +7,7 @@ const API_KEY = import.meta.env.VITE_API_KEY
 /* ---------- Types ---------- */
 interface AIInsight {
     summary: string;
-    recommendation: string;
+    mitigation_steps: string[];
     risk_score: number;
 }
 
@@ -34,6 +34,7 @@ interface Incident {
     timestamp?: any;
     user_notes?: string[];
     is_verified?: boolean;
+    completed_steps?: number[];
 }
 
 export default function Incidents() {
@@ -41,6 +42,7 @@ export default function Incidents() {
     const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
     const [loading, setLoading] = useState(true);
     const [note, setNote] = useState("");
+    const [viewMode, setViewMode] = useState<string>("details");
 
     // Search and filter states
     const [searchQuery, setSearchQuery] = useState("");
@@ -53,6 +55,47 @@ export default function Incidents() {
         console.log("Using API Key:", API_KEY);
         fetchIncidents();
     }, []);
+
+    // Reset view mode when selecting a new incident
+    useEffect(() => {
+        if (selectedIncident) setViewMode("details");
+    }, [selectedIncident]);
+
+    // Add this function to handle checkbox clicks
+    const handleToggleStep = async (docId: string, stepIndex: number) => {
+        if (!selectedIncident) return;
+
+        // 1. Calculate the new state locally
+        const currentSteps = selectedIncident.completed_steps || [];
+        const isCompleted = currentSteps.includes(stepIndex);
+
+        let newSteps;
+        if (isCompleted) {
+            newSteps = currentSteps.filter(i => i !== stepIndex); // Uncheck
+        } else {
+            newSteps = [...currentSteps, stepIndex]; // Check
+        }
+
+        // 2. Optimistic Update (Update UI immediately)
+        const updatedIncident = { ...selectedIncident, completed_steps: newSteps };
+        setSelectedIncident(updatedIncident); // Update selected view
+        setIncidents(prev => prev.map(inc => inc.id === docId ? updatedIncident : inc)); // Update list view
+
+        // 3. Send to API
+        try {
+            await fetch(`http://localhost:8000/api/incidents/${docId}/mitigate`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    "X-API-Key": API_KEY
+                },
+                body: JSON.stringify({ completed_steps: newSteps })
+            });
+        } catch (err) {
+            console.error("Failed to save progress", err);
+            // Optional: Revert state here if it fails
+        }
+    };
 
     const fetchIncidents = () => {
         fetch("http://localhost:8000/api/incidents", {
@@ -292,20 +335,6 @@ export default function Incidents() {
                     });
                     yPos += 3;
 
-                    // Recommendation
-                    doc.setFont('helvetica', 'bold');
-                    doc.text('Recommendation:', margin + 3, yPos);
-                    yPos += 5;
-                    doc.setFont('helvetica', 'normal');
-
-                    const recommendation = incident.ai_insights?.[0]?.recommendation || 'No recommendation available';
-                    const recLines = doc.splitTextToSize(recommendation, pageWidth - 2 * margin - 6);
-                    recLines.forEach((line: string) => {
-                        checkPageBreak(5);
-                        doc.text(line, margin + 3, yPos);
-                        yPos += 5;
-                    });
-
                     // User Notes
                     if (incident.user_notes && incident.user_notes.length > 0) {
                         yPos += 3;
@@ -477,7 +506,7 @@ export default function Incidents() {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center">
+            <div className="min-h-screen bg-linear-to-br from-purple-50 to-blue-50 flex items-center justify-center">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-purple-600 mx-auto mb-4"></div>
                     <p className="text-gray-600 font-bold">Loading incidents...</p>
@@ -491,7 +520,7 @@ export default function Incidents() {
         const severityLabel = getSeverityLabel(riskScore);
 
         return (
-            <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-8">
+            <div className="min-h-screen bg-linear-to-br from-purple-50 to-blue-50 p-8">
                 <div className="max-w-5xl mx-auto">
                     {/* Header */}
                     <div className="mb-8 flex items-center justify-between">
@@ -543,121 +572,179 @@ export default function Incidents() {
                             </div>
                         </div>
 
-                        {/* AI Analysis */}
-                        {selectedIncident.ai_insights && selectedIncident.ai_insights[0] && (
-                            <div className="space-y-6">
-                                {/* Risk Score */}
-                                <div>
-                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Risk Score</h3>
-                                    <div className="flex items-center gap-4">
-                                        <div className="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden">
-                                            <div
-                                                className={`h-full rounded-full transition-all ${riskScore >= 8 ? 'bg-red-500' :
-                                                    riskScore >= 6 ? 'bg-orange-500' :
-                                                        riskScore >= 4 ? 'bg-yellow-500' : 'bg-green-500'
-                                                    }`}
-                                                style={{ width: `${riskScore * 10}%` }}
-                                            ></div>
-                                        </div>
-                                        <span className="text-2xl font-black text-gray-800">{riskScore}/10</span>
+                        {/* Mitigation / Details Switcher */}
+                        {viewMode === "mitigation" ? (
+                            /* --- MITIGATION VIEW --- */
+                            <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+                                <div className="bg-indigo-50 p-6 rounded-2xl border-2 border-indigo-100 mb-6">
+                                    <h3 className="text-lg font-black text-indigo-900 mb-2 flex items-center gap-2">
+                                        <ShieldCheck className="text-indigo-600" />
+                                        Response Playbook
+                                    </h3>
+                                    <p className="text-sm text-indigo-700 mb-4">
+                                        Follow these steps to contain and remediate the threat. Tick them off as you go.
+                                    </p>
+
+                                    <div className="space-y-3">
+                                        {selectedIncident.ai_insights?.[0]?.mitigation_steps?.map((step, idx) => {
+                                            // Check if this specific index is inside completed_steps array
+                                            const isChecked = selectedIncident.completed_steps?.includes(idx) || false;
+
+                                            return (
+                                                <label
+                                                    key={idx}
+                                                    className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm ${isChecked
+                                                            ? "bg-indigo-100 border-indigo-300" // Darker style when checked
+                                                            : "bg-white border-indigo-50 hover:border-indigo-200"
+                                                        }`}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isChecked} // Controlled component
+                                                        onChange={() => handleToggleStep(selectedIncident.id, idx)} // Call our new handler
+                                                        className="w-5 h-5 mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                    />
+                                                    <span className={`text-sm font-medium leading-relaxed ${isChecked ? "text-indigo-800 line-through decoration-indigo-400" : "text-slate-700"
+                                                        }`}>
+                                                        {step}
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
                                     </div>
                                 </div>
 
-                                {/* Summary */}
-                                <div>
-                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">AI Summary</h3>
-                                    <p className="text-gray-700 leading-relaxed">{selectedIncident.ai_insights[0].summary}</p>
-                                </div>
-
-                                {/* Recommendation */}
-                                <div>
-                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Recommendation</h3>
-                                    <p className="text-gray-700 leading-relaxed">{selectedIncident.ai_insights[0].recommendation}</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Raw Event Data */}
-                        <div>
-                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Raw Event Data</h3>
-                            <div className="bg-gray-50 rounded-xl p-4 border-2 border-gray-100">
-                                <p className="text-xs font-mono text-gray-600 whitespace-pre-wrap">{selectedIncident.event.raw_sanitised_text}</p>
-                            </div>
-                        </div>
-
-                        {/* Technical Details */}
-                        {selectedIncident.event.technical_details && (
-                            <div>
-                                <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                                    <Network size={16} />
-                                    Technical Details
-                                </h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    {selectedIncident.event.technical_details.original_internal_ips && (
-                                        <div className="bg-blue-50 rounded-xl p-4 border-2 border-blue-100">
-                                            <p className="text-xs font-black text-blue-600 mb-2">Internal IPs</p>
-                                            <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_internal_ips.join(', ')}</p>
-                                        </div>
-                                    )}
-                                    {selectedIncident.event.technical_details.original_external_ips && (
-                                        <div className="bg-purple-50 rounded-xl p-4 border-2 border-purple-100">
-                                            <p className="text-xs font-black text-purple-600 mb-2">External IPs</p>
-                                            <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_external_ips.join(', ')}</p>
-                                        </div>
-                                    )}
-                                    {selectedIncident.event.technical_details.original_macs && (
-                                        <div className="bg-green-50 rounded-xl p-4 border-2 border-green-100">
-                                            <p className="text-xs font-black text-green-600 mb-2">MAC Addresses</p>
-                                            <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_macs.join(', ')}</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* User Notes */}
-                        <div>
-                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Investigation Notes</h3>
-                            {selectedIncident.user_notes && selectedIncident.user_notes.length > 0 ? (
-                                <div className="space-y-2 mb-4">
-                                    {selectedIncident.user_notes.map((note, idx) => (
-                                        <div key={idx} className="bg-yellow-50 border-2 border-yellow-100 rounded-xl p-3">
-                                            <p className="text-sm text-gray-700">{note}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="text-sm text-gray-400 italic mb-4">No notes yet</p>
-                            )}
-
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={note}
-                                    onChange={(e) => setNote(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && handleSaveNote(selectedIncident.id)}
-                                    placeholder="Add investigation note..."
-                                    className="flex-1 px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:border-purple-400 outline-none"
-                                />
                                 <button
-                                    onClick={() => handleSaveNote(selectedIncident.id)}
-                                    className="bg-purple-600 text-white px-6 py-3 rounded-xl text-sm font-black hover:bg-purple-700 transition-all"
+                                    onClick={() => setViewMode("details")}
+                                    className="text-slate-500 font-bold text-xs hover:text-indigo-600 flex items-center gap-2"
                                 >
-                                    Add Note
+                                    ← Back to Incident Details
                                 </button>
                             </div>
-                        </div>
+                        ) : (
+                            /* --- DETAILS VIEW (Wrapped) --- */
+                            <>
+                                {/* AI Analysis */}
+                                {selectedIncident.ai_insights && selectedIncident.ai_insights[0] && (
+                                    <div className="space-y-6">
+                                        {/* Risk Score */}
+                                        <div>
+                                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Risk Score</h3>
+                                            <div className="flex items-center gap-4">
+                                                <div className="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full transition-all ${riskScore >= 8 ? 'bg-red-500' :
+                                                                riskScore >= 6 ? 'bg-orange-500' :
+                                                                    riskScore >= 4 ? 'bg-yellow-500' : 'bg-green-500'
+                                                            }`}
+                                                        style={{ width: `${riskScore * 10}%` }}
+                                                    ></div>
+                                                </div>
+                                                <span className="text-2xl font-black text-gray-800">{riskScore}/10</span>
+                                            </div>
+                                        </div>
 
-                        {/* Actions */}
-                        {selectedIncident.analysis_status !== 'resolved' && (
-                            <div className="pt-6 border-t-2 border-gray-100">
-                                <button
-                                    onClick={() => handleMarkResolved(selectedIncident.id)}
-                                    className="w-full bg-green-600 text-white py-4 rounded-xl font-black hover:bg-green-700 transition-all"
-                                >
-                                    Mark as Resolved
-                                </button>
-                            </div>
+                                        {/* Summary */}
+                                        <div>
+                                            <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">AI Summary</h3>
+                                            <p className="text-gray-700 leading-relaxed">{selectedIncident.ai_insights[0].summary}</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Raw Event Data */}
+                                <div>
+                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Raw Event Data</h3>
+                                    <div className="bg-gray-50 rounded-xl p-4 border-2 border-gray-100">
+                                        <p className="text-xs font-mono text-gray-600 whitespace-pre-wrap">{selectedIncident.event.raw_sanitised_text}</p>
+                                    </div>
+                                </div>
+
+                                {/* Technical Details */}
+                                {selectedIncident.event.technical_details && (
+                                    <div>
+                                        <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                            <Network size={16} />
+                                            Technical Details
+                                        </h3>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {selectedIncident.event.technical_details.original_internal_ips && (
+                                                <div className="bg-blue-50 rounded-xl p-4 border-2 border-blue-100">
+                                                    <p className="text-xs font-black text-blue-600 mb-2">Internal IPs</p>
+                                                    <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_internal_ips.join(', ')}</p>
+                                                </div>
+                                            )}
+                                            {selectedIncident.event.technical_details.original_external_ips && (
+                                                <div className="bg-purple-50 rounded-xl p-4 border-2 border-purple-100">
+                                                    <p className="text-xs font-black text-purple-600 mb-2">External IPs</p>
+                                                    <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_external_ips.join(', ')}</p>
+                                                </div>
+                                            )}
+                                            {selectedIncident.event.technical_details.original_macs && (
+                                                <div className="bg-green-50 rounded-xl p-4 border-2 border-green-100">
+                                                    <p className="text-xs font-black text-green-600 mb-2">MAC Addresses</p>
+                                                    <p className="text-xs font-mono text-gray-700">{selectedIncident.event.technical_details.original_macs.join(', ')}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* User Notes */}
+                                <div>
+                                    <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Investigation Notes</h3>
+                                    {selectedIncident.user_notes && selectedIncident.user_notes.length > 0 ? (
+                                        <div className="space-y-2 mb-4">
+                                            {selectedIncident.user_notes.map((note, idx) => (
+                                                <div key={idx} className="bg-yellow-50 border-2 border-yellow-100 rounded-xl p-3">
+                                                    <p className="text-sm text-gray-700">{note}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-gray-400 italic mb-4">No notes yet</p>
+                                    )}
+
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={note}
+                                            onChange={(e) => setNote(e.target.value)}
+                                            onKeyPress={(e) => e.key === 'Enter' && handleSaveNote(selectedIncident.id)}
+                                            placeholder="Add investigation note..."
+                                            className="flex-1 px-4 py-3 border-2 border-gray-100 rounded-xl text-sm focus:border-purple-400 outline-none"
+                                        />
+                                        <button
+                                            onClick={() => handleSaveNote(selectedIncident.id)}
+                                            className="bg-purple-600 text-white px-6 py-3 rounded-xl text-sm font-black hover:bg-purple-700 transition-all"
+                                        >
+                                            Add Note
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode("mitigation")}
+                                            className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition-all flex items-center gap-2 ${viewMode === "mitigation"
+                                                    ? "bg-indigo-600 text-white border-indigo-600"
+                                                    : "bg-white text-indigo-600 border-indigo-100 hover:border-indigo-300"
+                                                }`}
+                                        >
+                                            <ClipboardList size={16} />
+                                            MITIGATION PLAN
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Actions */}
+                                {selectedIncident.analysis_status !== 'resolved' && (
+                                    <div className="pt-6 border-t-2 border-gray-100">
+                                        <button
+                                            onClick={() => handleMarkResolved(selectedIncident.id)}
+                                            className="w-full bg-green-600 text-white py-4 rounded-xl font-black hover:bg-green-700 transition-all"
+                                        >
+                                            Mark as Resolved
+                                        </button>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
@@ -666,7 +753,7 @@ export default function Incidents() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-8">
+        <div className="min-h-screen bg-linear-to-br from-purple-50 to-blue-50 p-8">
             <div className="max-w-7xl mx-auto space-y-8">
                 {/* Header */}
                 <div className="flex items-center justify-between">
@@ -712,8 +799,8 @@ export default function Incidents() {
                         <button
                             onClick={() => setShowFilters(!showFilters)}
                             className={`px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${showFilters || activeFilterCount > 0
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-white border-2 border-gray-100 text-gray-700 hover:border-purple-400'
+                                    ? 'bg-purple-600 text-white'
+                                    : 'bg-white border-2 border-gray-100 text-gray-700 hover:border-purple-400'
                                 }`}
                         >
                             <Filter size={18} />
@@ -738,12 +825,12 @@ export default function Incidents() {
                                             key={severity}
                                             onClick={() => toggleSeverityFilter(severity)}
                                             className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all ${severityFilter.includes(severity)
-                                                ? severity === 'Critical' ? 'bg-red-100 border-red-300 text-red-700'
-                                                    : severity === 'High' ? 'bg-orange-100 border-orange-300 text-orange-700'
-                                                        : severity === 'Medium' ? 'bg-yellow-100 border-yellow-300 text-yellow-700'
-                                                            : severity === 'Low' ? 'bg-green-100 border-green-300 text-green-700'
-                                                                : 'bg-gray-100 border-gray-300 text-gray-700'
-                                                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                                                    ? severity === 'Critical' ? 'bg-red-100 border-red-300 text-red-700'
+                                                        : severity === 'High' ? 'bg-orange-100 border-orange-300 text-orange-700'
+                                                            : severity === 'Medium' ? 'bg-yellow-100 border-yellow-300 text-yellow-700'
+                                                                : severity === 'Low' ? 'bg-green-100 border-green-300 text-green-700'
+                                                                    : 'bg-gray-100 border-gray-300 text-gray-700'
+                                                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
                                                 }`}
                                         >
                                             {severity}
@@ -761,10 +848,10 @@ export default function Incidents() {
                                             key={status}
                                             onClick={() => toggleStatusFilter(status)}
                                             className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all uppercase ${statusFilter.includes(status)
-                                                ? status === 'resolved' ? 'bg-green-100 border-green-300 text-green-700'
-                                                    : status === 'completed' ? 'bg-blue-100 border-blue-300 text-blue-700'
-                                                        : 'bg-gray-100 border-gray-300 text-gray-700'
-                                                : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
+                                                    ? status === 'resolved' ? 'bg-green-100 border-green-300 text-green-700'
+                                                        : status === 'completed' ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                                            : 'bg-gray-100 border-gray-300 text-gray-700'
+                                                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
                                                 }`}
                                         >
                                             {status.replace('_', ' ')}
@@ -872,7 +959,7 @@ export default function Incidents() {
                                                 </span>
                                             </td>
                                             <td className="p-5 text-xs font-bold text-gray-500">{formatTimestamp(item.timestamp)}</td>
-                                            <td className="p-5 text-[11px] text-gray-400 font-mono truncate max-w-[250px] italic">{item.event.raw_sanitised_text}</td>
+                                            <td className="p-5 text-[11px] text-gray-400 font-mono truncate max-w-62.5 italic">{item.event.raw_sanitised_text}</td>
                                             <td className="p-5 text-center">
                                                 <button
                                                     onClick={() => setSelectedIncident(item)}

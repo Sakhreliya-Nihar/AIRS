@@ -3,6 +3,7 @@ from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
 from google import genai
 from security.crypto import encrypt_payload # removed encryption within this file and added it to a new helper function 
+from google.genai.types import GenerateContentConfig, SafetySetting, HarmCategory, HarmBlockThreshold
 
 current_dir = os.path.dirname(__file__)#trying to fix pathing issues between laptop and pc
 ENV_PATH = os.path.join(current_dir, ".env")
@@ -131,9 +132,7 @@ def get_ai_persona():
             "For the recommendation, provide specific remediation commands (e.g., 'Block IP x via iptables', 'Patch CVE-2023-xxx')."
         )
     }
-    
     return prompts.get(level, prompts["business_owner"])
-
 
 def process_batch(batch_list):
     global last_batch_time
@@ -146,26 +145,61 @@ def process_batch(batch_list):
 
     persona_instruction = get_ai_persona() 
     print(f"AI Persona Loaded: {persona_instruction[:50]}...") # Print first 50 chars to confirm
-
     try: 
-
         print("Waiting 60 seconds for API rate limits...")
         time.sleep(61)
-
         response = client.models.generate_content(
             model='gemini-2.5-flash-lite',
+             config=GenerateContentConfig(
+                safety_settings=[
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                ],
+                response_mime_type="application/json"
+            ),
             contents=f"""
+
+
             {persona_instruction}
 
             LOGS:
             {combined_text}
             
-            Return ONLY a JSON list of objects, one for each ID provided:
+            INSTRUCTIONS FOR MITIGATION:
+            You are an IT Administrator. 
+            For 'mitigation_steps', do NOT give generic advice like "Contact IT". 
+            Instead, provide specific CLI commands or exact actions based on the log content.
+
+            Examples:
+            - If an IP is attacking: "Run: sudo iptables -A INPUT -s [The_IP_Address] -j DROP"
+            - If a user is compromised: "Run: sudo passwd -l [The_Username]"
+            - If a service is failing: "Run: sudo systemctl restart [Service_Name]"
+
+            Return ONLY a JSON list of objects:
             [
               {{ 
                 "event_id": "the_original_id",
-                "summary": "Specific non-technical summary for this log", 
-                "recommendation": "Specific recommendation for this log", 
+                "summary": "Short explanation of what happened", 
+                "mitigation_steps": [
+                    "Step 1 (Valuable Info, like Who to contact)",
+                    "Step 2 (Specific Command)",
+                    "Step 3 (Configuration Change)",
+                    "Step 4 (Verification Step)"
+                ],
                 "risk_score": 1-10 
               }}
             ] 
@@ -189,11 +223,11 @@ def process_batch(batch_list):
                 # Encrypt the INDIVIDUAL insight
                 encrypted_insights = encrypt_payload({
                     "summary": res['summary'],
-                    "recommendation": res['recommendation'],
+                    "mitigation_steps": res.get('mitigation_steps', ["Review logs manually"]), # Fallback if empty
                     "risk_score": res['risk_score']
                 })
                 db.collection("incidents").document(doc_id).update({
-                    "ai_insights": [encrypted_insights], # Save as a list for your frontend
+                    "ai_insights": [encrypted_insights], # Save as a list for frontend
                     "risk_score": res['risk_score'], # Store plain for analytics
                     "analysis_status": "completed"
                 })
