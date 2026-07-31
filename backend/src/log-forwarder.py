@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from google import genai
 from security.crypto import encrypt_payload
 from google.genai.types import GenerateContentConfig, SafetySetting, HarmCategory, HarmBlockThreshold
+from services.notifications import send_consolidated_email
 
 current_dir = os.path.dirname(__file__)#trying to fix pathing issues between laptop and pc
 ENV_PATH = os.path.join(current_dir, ".env")
@@ -85,6 +86,8 @@ last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
 processed_files_announced = set() # stop the terminal spam for processed logs check
 
+
+
 # --- HELPERS FOR FILE TRACKING ---
 TRACKING_FILE = os.path.join(current_dir, "log_progress.json")
 def get_file_progress():
@@ -100,10 +103,9 @@ def save_file_progress(progress_data):
     """Saves the current read position."""
     with open(TRACKING_FILE, 'w') as f:
         json.dump(progress_data, f)
-# -------------------------------------
 def generate_integrity_hash(event_id, text, timestamp):
     """Creates a SHA-256 hash of the core event data to ensure integrity."""
-    # We combine the unique ID, the log text, and the timestamp string
+    # combine the unique ID, the log text, and the timestamp string
     combined_string = f"{event_id}|{text}|{timestamp}"
     return hashlib.sha256(combined_string.encode()).hexdigest()
 
@@ -228,6 +230,15 @@ def process_batch(batch_list):
         # Map results by event_id for easy lookup
         results_map = {res['event_id']: res for res in ai_results}
 
+
+        # Fetch users once per batch to save resources
+        users = list(db.collection("users").stream())
+
+        user_notification_batches = {}
+
+
+
+
         # Update Firestore individually for each item in the batch
         for item in batch_list:
             doc_id = item.get("doc_id")
@@ -235,18 +246,49 @@ def process_batch(batch_list):
             
             if event_id in results_map and doc_id:
                 res = results_map[event_id]
+                risk = res['risk_score']
+                summary = res['summary']
                 # Encrypt the INDIVIDUAL insight
                 encrypted_insights = encrypt_payload({
-                    "summary": res['summary'],
+                    "summary": summary,
                     "mitigation_steps": res.get('mitigation_steps', ["Review logs manually"]), # Fallback if empty
-                    "risk_score": res['risk_score']
+                    "risk_score": risk
                 })
                 db.collection("incidents").document(doc_id).update({
                     "ai_insights": [encrypted_insights], # Save as a list for frontend
-                    "risk_score": res['risk_score'], # Store plain for analytics
-                    "analysis_status": "completed"
+                    "risk_score": risk, # Store plain for analytics
+                    "analysis_status": "AI_Analysis_Complete"
                 })
-        print("Success: Individual AI Analysis published to firestore")
+        
+               # Trigger Notifications for this specific incident
+                for user_doc in users:
+                    user_data = user_doc.to_dict()
+                    target_email = user_data.get("email")
+                    pref = user_data.get("notification_level", "critical")
+                    
+                    # Logic to decide if email is seent
+                    should_notify = (
+                        (pref == "all") or 
+                        (pref == "high" and risk >= 6) or 
+                        (pref == "critical" and risk >= 8)
+                    )
+
+                    if should_notify and target_email:
+                        if target_email not in user_notification_batches:
+                            user_notification_batches[target_email] = []
+                        
+                        # Add this incident to the user's specific batch
+                        user_notification_batches[target_email].append({
+                            "event_id": event_id,
+                            "risk_score": risk,
+                            "summary": summary
+                        })
+                        
+        # After processing ALL incidents in the batch, send ONE email per user
+        for email, incident_list in user_notification_batches.items():
+            send_consolidated_email(email, incident_list)
+
+        print("Success: Batch processed and notifications sent.")
 
     except Exception as e:
         # If rate limit hit...
