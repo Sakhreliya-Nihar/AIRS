@@ -1,51 +1,62 @@
-import { useEffect, useState, useMemo } from "react";
-// Recharts: A charting library for React that uses SVG for rendering
+import React, { useEffect, useState, useMemo } from "react";
 import {
     AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, Legend, CartesianGrid
 } from 'recharts';
-// Lucide-React: An icon library providing consistent, scalable vector icons
 import {
     ShieldAlert, ShieldCheck, Activity, AlertTriangle,
-    RefreshCw, Info, Calendar, TrendingUp, Wifi, WifiOff, AlertCircle, Database,
+    RefreshCw, Calendar, TrendingUp, Wifi, AlertCircle,
     Clock, ChevronDown
 } from "lucide-react";
 
-// --- SECURITY: Load API Key from Environment Variables ---
 const API_KEY = import.meta.env.VITE_API_KEY;
 
+/* ---------- Types & Interfaces ---------- */
+interface AIInsight {
+    summary: string;
+    mitigation_steps: string[];
+    risk_score: number;
+}
+
+interface Incident {
+    id?: string;
+    analysis_status: string;
+    timestamp?: any;
+    ai_insights?: AIInsight[] | null;
+}
+
+interface StatCardProps {
+    label: string;
+    value: number | string;
+    color?: string;
+    icon: React.ElementType;
+    trend?: string;
+}
+
 /* ---------- Configuration & Constants ---------- */
-// Mapping severity levels to specific hex codes for consistent UI branding
-const SEVERITY_COLORS = {
+const SEVERITY_COLORS: Record<string, string> = {
     Critical: "#ef4444",
     High: "#f97316",
     Medium: "#eab308",
     Low: "#22c55e"
 };
 
-// Time range presets
 const TIME_RANGES = [
-    { label: 'Last Hour', value: 'hour', hours: 1 },
-    { label: 'Last 24 Hours', value: 'day', hours: 24 },
-    { label: 'Last 7 Days', value: 'week', days: 7 },
-    { label: 'Last 30 Days', value: 'month', days: 30 },
-    { label: 'Last Year', value: 'year', days: 365 },
-    { label: 'All Time', value: 'all', days: null },
-    { label: 'Custom Range', value: 'custom', days: null }
+    { label: 'Last Hour', value: 'hour', hours: 1, days: null },
+    { label: 'Last 24 Hours', value: 'day', hours: 24, days: null },
+    { label: 'Last 7 Days', value: 'week', hours: null, days: 7 },
+    { label: 'Last 30 Days', value: 'month', hours: null, days: 30 },
+    { label: 'Last Year', value: 'year', hours: null, days: 365 },
+    { label: 'All Time', value: 'all', hours: null, days: null },
+    { label: 'Custom Range', value: 'custom', hours: null, days: null }
 ];
 
 /* ---------- Sub-Components ---------- */
-/**
-* StatCard: A reusable functional component for the top metric cards.
-* Uses destructuring to pull props (label, value, colour, etc.)
-*/
-const StatCard = ({ label, value, color, icon: Icon, trend }) => (
+const StatCard: React.FC<StatCardProps> = ({ label, value, color, icon: Icon, trend }) => (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-start justify-between hover:shadow-md transition-all duration-300">
         <div>
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
-            {/* Dynamic text colour based on the 'colour' prop */}
             <h3 className={`text-2xl font-black ${color || "text-slate-900"}`}>{value}</h3>
-            {/* Only render the trend element if a trend value exists (conditional rendering) */}
             {trend && (
                 <div className="flex items-center gap-1 mt-2">
                     <TrendingUp size={12} className="text-green-500" />
@@ -53,7 +64,6 @@ const StatCard = ({ label, value, color, icon: Icon, trend }) => (
                 </div>
             )}
         </div>
-        {/* Visual background for icons using dynamic Tailwind class manipulation */}
         <div className={`p-3 rounded-xl ${color ? color.replace('text-', 'bg-').replace('600', '100').replace('500', '100') : "bg-indigo-50 text-indigo-600"} flex items-center justify-center`}>
             <Icon size={20} />
         </div>
@@ -62,68 +72,53 @@ const StatCard = ({ label, value, color, icon: Icon, trend }) => (
 
 /* ---------- Main Component ---------- */
 export default function Analytics() {
-    // State Hooks: Managing data, loading states, and error handling
-    const [incidents, setIncidents] = useState([]);      // Array of incident objects from API
-    const [loading, setLoading] = useState(true);        // Initial full-page load state
-    const [isSyncing, setIsSyncing] = useState(false);    // State for manual refresh button feedback
-    const [error, setError] = useState(null);            // Stores error strings if API fails
-    const [lastSyncTime, setLastSyncTime] = useState(null); // Timestamp of last successful fetch
+    // Strongly typed state
+    const [incidents, setIncidents] = useState<Incident[]>([]);
+    const [loading, setLoading] = useState<boolean>(true);
+    const [isSyncing, setIsSyncing] = useState<boolean>(false);
+    const [error, setError] = useState<string | null>(null);
+    const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
-    // Time range filtering state
-    const [selectedRange, setSelectedRange] = useState('week'); // Default to 7 days
-    const [customStartDate, setCustomStartDate] = useState('');
-    const [customEndDate, setCustomEndDate] = useState('');
-    const [showCustomPicker, setShowCustomPicker] = useState(false);
+    const [selectedRange, setSelectedRange] = useState<string>('week');
+    const [customStartDate, setCustomStartDate] = useState<string>('');
+    const [customEndDate, setCustomEndDate] = useState<string>('');
+    const [showCustomPicker, setShowCustomPicker] = useState<boolean>(false);
 
-    /**
-      * fetchData: Asynchronous function to communicate with the FastAPI backend.
-      * Uses the Fetch API to perform a GET request.
-      */
     const fetchData = async () => {
-        setError(null); // Reset error state before attempt
+        setError(null);
         try {
-            // Fetching from the local FastAPI loopback address
-            // --- SECURITY UPDATE: Added headers with API Key ---
             const res = await fetch("http://127.0.0.1:8000/api/incidents", {
                 headers: {
                     "X-API-Key": API_KEY
                 }
             });
 
-            // Error handling: Fetch only throws on network failure, not 404/500s
             if (!res.ok) {
                 if (res.status === 403) throw new Error("403 Forbidden: Invalid API Key");
                 throw new Error(`HTTP Error: ${res.status}`);
             }
 
-            const data = await res.json();
-            setIncidents(data); // Store results in state
-            setLastSyncTime(new Date().toLocaleTimeString()); // Record success time
-        } catch (err) {
+            const data: Incident[] = await res.json();
+            setIncidents(data);
+            setLastSyncTime(new Date().toLocaleTimeString());
+        } catch (err: any) {
             console.error("API Error:", err);
-            setError(err.message === "403 Forbidden: Invalid API Key" ? "Authentication Failed" : "API Offline");
+            setError(err?.message === "403 Forbidden: Invalid API Key" ? "Authentication Failed" : "API Offline");
         } finally {
-            setLoading(false);      // Remove initial spinner
-            setIsSyncing(false);    // Stop refresh button animation
+            setLoading(false);
+            setIsSyncing(false);
         }
     };
 
-    // useEffect: Runs once when the component mounts to trigger the initial data load
     useEffect(() => {
         fetchData();
     }, []);
 
-    /**
-     * Filter incidents based on selected time range
-     */
     const filteredIncidents = useMemo(() => {
-        const now = new Date();
-
-        // Handle custom date range
         if (selectedRange === 'custom' && customStartDate && customEndDate) {
             const start = new Date(customStartDate);
             const end = new Date(customEndDate);
-            end.setHours(23, 59, 59, 999); // Include entire end day
+            end.setHours(23, 59, 59, 999);
 
             return incidents.filter(inc => {
                 const incDate = inc.timestamp?.seconds
@@ -133,12 +128,10 @@ export default function Analytics() {
             });
         }
 
-        // Handle 'All Time' selection
         if (selectedRange === 'all') {
             return incidents;
         }
 
-        // Handle preset ranges
         const range = TIME_RANGES.find(r => r.value === selectedRange);
         if (!range) return incidents;
 
@@ -158,20 +151,15 @@ export default function Analytics() {
         });
     }, [incidents, selectedRange, customStartDate, customEndDate]);
 
-    /* ---------- Data Processing (useMemo used for performance optimization) ---------- */
-
-    // Logic to calculate summary metrics (Total, Open, Critical) - now uses filtered data
     const stats = useMemo(() => {
         const total = filteredIncidents.length;
         const open = filteredIncidents.filter(i => i.analysis_status !== "resolved").length;
-        // Critical incidents defined as score >= 8 and not yet resolved
         const critical = filteredIncidents.filter(i =>
             (i.ai_insights?.[0]?.risk_score ?? 0) >= 8 && i.analysis_status !== "resolved"
         ).length;
         return { total, open, critical, resolved: total - open };
     }, [filteredIncidents]);
 
-    // Logic to format data for the Pie Chart - now uses filtered data
     const severityData = useMemo(() => {
         const analyzedIncidents = filteredIncidents.filter(i =>
             i.ai_insights && i.ai_insights.length > 0 && i.ai_insights[0].risk_score !== undefined
@@ -180,54 +168,52 @@ export default function Analytics() {
         return [
             {
                 name: 'Critical',
-                value: analyzedIncidents.filter(i => i.ai_insights[0].risk_score >= 8).length
+                value: analyzedIncidents.filter(i => (i.ai_insights?.[0].risk_score ?? 0) >= 8).length
             },
             {
                 name: 'High',
                 value: analyzedIncidents.filter(i => {
-                    const s = i.ai_insights[0].risk_score;
+                    const s = i.ai_insights?.[0].risk_score ?? 0;
                     return s >= 6 && s < 8;
                 }).length
             },
             {
                 name: 'Medium',
                 value: analyzedIncidents.filter(i => {
-                    const s = i.ai_insights[0].risk_score;
+                    const s = i.ai_insights?.[0].risk_score ?? 0;
                     return s >= 4 && s < 6;
                 }).length
             },
             {
                 name: 'Low',
-                value: analyzedIncidents.filter(i => i.ai_insights[0].risk_score < 4).length
+                value: analyzedIncidents.filter(i => (i.ai_insights?.[0].risk_score ?? 0) < 4).length
             },
         ].filter(d => d.value > 0);
     }, [filteredIncidents]);
 
-    // Logic to format data for the trend chart - dynamically adjusts based on time range
     const trendData = useMemo(() => {
-        // Determine appropriate granularity based on selected range
         let intervals = 7;
         let intervalType = 'day';
 
         if (selectedRange === 'hour') {
-            intervals = 12; // 5-minute intervals
+            intervals = 12;
             intervalType = 'minute';
         } else if (selectedRange === 'day') {
-            intervals = 24; // Hourly
+            intervals = 24;
             intervalType = 'hour';
         } else if (selectedRange === 'week') {
-            intervals = 7; // Daily
+            intervals = 7;
             intervalType = 'day';
         } else if (selectedRange === 'month') {
-            intervals = 30; // Daily
+            intervals = 30;
             intervalType = 'day';
         } else if (selectedRange === 'year') {
-            intervals = 12; // Monthly
+            intervals = 12;
             intervalType = 'month';
         } else if (selectedRange === 'custom' && customStartDate && customEndDate) {
             const start = new Date(customStartDate);
             const end = new Date(customEndDate);
-            const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+            const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 
             if (daysDiff <= 1) {
                 intervals = 24;
@@ -247,7 +233,6 @@ export default function Analytics() {
         return [...Array(intervals)].map((_, i) => {
             const targetDate = new Date();
 
-            // Calculate target date based on interval type
             if (intervalType === 'minute') {
                 targetDate.setMinutes(targetDate.getMinutes() - ((intervals - 1 - i) * 5));
             } else if (intervalType === 'hour') {
@@ -258,13 +243,12 @@ export default function Analytics() {
                 targetDate.setMonth(targetDate.getMonth() - (intervals - 1 - i));
             }
 
-            // Count incidents in this interval
             const count = filteredIncidents.filter(inc => {
                 const incDate = inc.timestamp?.seconds
                     ? new Date(inc.timestamp.seconds * 1000)
                     : new Date(inc.timestamp);
 
-                if (isNaN(incDate)) return false;
+                if (isNaN(incDate.getTime())) return false;
 
                 if (intervalType === 'minute') {
                     const startOfInterval = new Date(targetDate);
@@ -283,26 +267,22 @@ export default function Analytics() {
                 return false;
             }).length;
 
-            // Format label based on interval type
-            let label;
-            if (intervalType === 'minute') {
-                label = targetDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-            } else if (intervalType === 'hour') {
-                label = targetDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-            } else if (intervalType === 'day') {
-                label = targetDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-            } else if (intervalType === 'month') {
-                label = targetDate.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
-            }
+            let label; {
+                if (intervalType === 'minute' || intervalType === 'hour') {
+                    label = targetDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                } else if (intervalType === 'day') {
+                    label = targetDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                } else if (intervalType === 'month') {
+                    label = targetDate.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+                }
 
-            return {
-                date: label,
-                attacks: count
-            };
-        });
+                return {
+                    date: label,
+                    attacks: count
+                };
+            });
     }, [filteredIncidents, selectedRange, customStartDate, customEndDate]);
 
-    // Loading Screen: Displayed while the initial fetchData() is running
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
@@ -314,7 +294,6 @@ export default function Analytics() {
 
     return (
         <div className="p-8 bg-[#F8FAFC] min-h-screen text-slate-900 font-sans flex flex-col">
-            {/* Page Header */}
             <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                 <div>
                     <h2 className="text-3xl font-black tracking-tighter text-slate-900">Security Analytics</h2>
@@ -324,7 +303,6 @@ export default function Analytics() {
                     </div>
                 </div>
 
-                {/* Time Range Selector */}
                 <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                         <Clock size={16} className="text-indigo-600" />
@@ -332,11 +310,7 @@ export default function Analytics() {
                             value={selectedRange}
                             onChange={(e) => {
                                 setSelectedRange(e.target.value);
-                                if (e.target.value !== 'custom') {
-                                    setShowCustomPicker(false);
-                                } else {
-                                    setShowCustomPicker(true);
-                                }
+                                setShowCustomPicker(e.target.value === 'custom');
                             }}
                             className="text-xs font-bold text-slate-700 bg-transparent border-none outline-none cursor-pointer"
                         >
@@ -347,8 +321,7 @@ export default function Analytics() {
                         <ChevronDown size={14} className="text-slate-400" />
                     </div>
 
-                    {/* Custom Date Picker */}
-                    {selectedRange === 'custom' && (
+                    {showCustomPicker && (
                         <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
                             <input
                                 type="date"
@@ -368,7 +341,6 @@ export default function Analytics() {
                 </div>
             </header>
 
-            {/* Metric Cards Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <StatCard label="Total Events" value={stats.total} icon={Activity} />
                 <StatCard label="Critical Threats" value={stats.critical} color="text-red-600" icon={ShieldAlert} />
@@ -376,16 +348,13 @@ export default function Analytics() {
                 <StatCard label="Resolved" value={stats.resolved} color="text-green-600" icon={ShieldCheck} trend="+12% Resolution" />
             </div>
 
-            {/* Charts Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-8">
-                {/* Area Chart: Trend Analysis */}
                 <div className="lg:col-span-8">
-                    <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
+                    <div className="bg-white p-8 rounded-4xl shadow-sm border border-slate-100">
                         <h3 className="text-lg font-bold mb-8">Threat Activity Trend</h3>
                         <div style={{ width: '100%', height: 350 }}>
                             <ResponsiveContainer>
                                 <AreaChart data={trendData}>
-                                    {/* Definition for the gradient under the area line */}
                                     <defs>
                                         <linearGradient id="colorAttacks" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15} />
@@ -411,15 +380,13 @@ export default function Analytics() {
                     </div>
                 </div>
 
-                {/* Pie Chart: Severity Distribution */}
                 <div className="lg:col-span-4">
-                    <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 h-full">
+                    <div className="bg-white p-8 rounded-4xl shadow-sm border border-slate-100 h-full">
                         <h3 className="text-lg font-bold mb-2">Risk Breakdown</h3>
                         <div style={{ width: '100%', height: 300 }}>
                             <ResponsiveContainer>
                                 <PieChart>
                                     <Pie data={severityData} innerRadius={80} outerRadius={105} paddingAngle={10} dataKey="value" stroke="none">
-                                        {/* Iterating through data to apply custom severity colors */}
                                         {severityData.map((entry, index) => (
                                             <Cell key={`cell-${index}`} fill={SEVERITY_COLORS[entry.name]} />
                                         ))}
@@ -433,14 +400,10 @@ export default function Analytics() {
                 </div>
             </div>
 
-            {/* ---------- API STATUS FOOTER ---------- 
-         This section monitors the health of the connection to the FastAPI backend.
-     */}
             <footer className="mt-auto pt-4">
                 <div className={`bg-white rounded-3xl p-6 border-2 transition-all duration-500 flex flex-col md:flex-row items-center justify-between gap-4 ${error ? 'border-red-100 bg-red-50/30' : 'border-slate-50 shadow-sm'
                     }`}>
                     <div className="flex items-center gap-4">
-                        {/* Conditional Status Icon: Red for error, Spinning for sync, Green for OK */}
                         <div className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-all ${error ? 'bg-red-100 text-red-600' : isSyncing ? 'bg-indigo-100 text-indigo-600 animate-pulse' : 'bg-green-100 text-green-600'
                             }`}>
                             {error ? <AlertCircle size={24} /> : isSyncing ? <RefreshCw size={24} className="animate-spin" /> : <Wifi size={24} />}
@@ -451,7 +414,6 @@ export default function Analytics() {
                                 <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">
                                     {error ? "Backend Disconnected" : isSyncing ? "Syncing Incident Engine" : "System Engine Active"}
                                 </h4>
-                                {/* Visual Pill indicating Online/Offline status */}
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${error ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                                     }`}>
                                     {error ? "OFFLINE" : "ONLINE"}
@@ -464,13 +426,11 @@ export default function Analytics() {
                     </div>
 
                     <div className="flex items-center gap-3 w-full md:w-auto">
-                        {/* Label showing the exact endpoint for development transparency */}
                         <div className="hidden lg:flex flex-col items-end mr-4">
                             <span className="text-[10px] font-black text-slate-400 uppercase">Endpoint</span>
                             <span className="text-xs font-bold text-slate-600">http://127.0.0.1:8000/api/incidents</span>
                         </div>
 
-                        {/* Manual Re-sync Button: Re-runs fetchData() without a page reload */}
                         <button
                             onClick={() => { setIsSyncing(true); fetchData(); }}
                             disabled={isSyncing}
@@ -484,9 +444,8 @@ export default function Analytics() {
                 </div>
 
                 <p className="text-center text-[10px] font-bold text-slate-300 mt-4 uppercase tracking-[0.2em]">
-                    Security Assistant Dashboard • Interface Built by Nihar Sakhreliya
+                    Security Assistant Dashboard • Interface Built by Matthew Fish
                 </p>
             </footer>
         </div>
     );
-}

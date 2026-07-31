@@ -1,5 +1,9 @@
-//import { useState } from "react";
+import { useState, useEffect } from "react";
 import "../App.css";
+
+// --- FIREBASE IMPORTS ---
+import { auth, db } from "../firebase";
+import { doc, getDoc } from "firebase/firestore";
 
 interface NavBarProps {
     brandName: string;
@@ -8,10 +12,47 @@ interface NavBarProps {
     onSelect: (item: string) => void;
     activeItem: string;
 }
+
+// Helper function to extract initials from a string
+const getInitials = (name: string) => {
+    if (!name) return "U"; // Default to "U" for User if nothing is found
+    const parts = name.trim().split(" ");
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 function NavBar({ brandName, imageSrcPath, navItems, onSelect, activeItem }: NavBarProps) {
+    // State to hold the dynamic initials
+    const [initials, setInitials] = useState<string>("--");
+
+    // Fetch the user's name from Firestore when the NavBar loads
+    useEffect(() => {
+        const fetchUserInitials = async () => {
+            const user = auth.currentUser;
+            if (user) {
+                try {
+                    const docRef = doc(db, "users", user.uid);
+                    const docSnap = await getDoc(docRef);
+
+                    if (docSnap.exists() && docSnap.data().name) {
+                        // If they have a name in the database, use it
+                        setInitials(getInitials(docSnap.data().name));
+                    } else if (user.email) {
+                        // Fallback: use the first part of their email address
+                        setInitials(getInitials(user.email.split('@')[0]));
+                    }
+                } catch (error) {
+                    console.error("Error fetching user data:", error);
+                }
+            }
+        };
+
+        fetchUserInitials();
+    }, []);
+
     return (
         <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-3">
-            <div className="max-w-[1600px] mx-auto flex items-center justify-between">
+            <div className="max-w-400 mx-auto flex items-center justify-between">
 
                 {/* Brand Section */}
                 <div
@@ -45,7 +86,7 @@ function NavBar({ brandName, imageSrcPath, navItems, onSelect, activeItem }: Nav
                                     key={item}
                                     onClick={() => onSelect(item)}
                                     className={`relative px-4 py-2 text-sm font-bold cursor-pointer transition-all duration-200 rounded-lg
-                    ${isActive
+                   ${isActive
                                             ? "text-purple-600 bg-purple-50"
                                             : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
                                         }`}
@@ -59,6 +100,7 @@ function NavBar({ brandName, imageSrcPath, navItems, onSelect, activeItem }: Nav
                             );
                         })}
                     </ul>
+
                     {/* Search Bar */}
                     <div className="flex items-center gap-3 bg-slate-100/50 px-4 py-2 rounded-2xl border border-slate-200 focus-within:border-purple-300 focus-within:bg-white transition-all">
                         <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -75,8 +117,8 @@ function NavBar({ brandName, imageSrcPath, navItems, onSelect, activeItem }: Nav
 
                 {/* User Profile / Mobile Menu */}
                 <div className="flex items-center gap-4">
-                    <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white text-xs font-black shadow-lg shadow-purple-200">
-                        MF
+                    <div className="h-8 w-8 rounded-full bg-linear-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white text-xs font-black shadow-lg shadow-purple-200">
+                        {initials}
                     </div>
                     <div className="md:hidden text-slate-500 cursor-pointer p-2 hover:bg-slate-50 rounded-lg">
                         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -84,9 +126,8 @@ function NavBar({ brandName, imageSrcPath, navItems, onSelect, activeItem }: Nav
                         </svg>
                     </div>
                 </div>
+
             </div>
         </nav>
     );
 }
-
-export default NavBar;
