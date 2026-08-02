@@ -30,10 +30,13 @@ dst_dir = os.path.join(current_dir, "..", "clean-logs")
 
 
 # Config for sanitisation 
-acc_ext = [".log", ".txt", ".ids", ".fast"] # accepted file extensions
-pattern_ip = r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"
-pattern_mac = r"(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})"
-#pattern_email = ("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+acc_ext = [".log", ".txt", ".ids", ".fast", ".ndjson"] # accepted file extensions
+pattern_ip = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
+pattern_ipv6 = re.compile(r"(?:(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}|:(?::[0-9a-fA-F]{1,4}){1,7}|::1)")
+pattern_mac = re.compile(r"(?:[0-9A-Fa-f]{2}[:-]){5}(?:[0-9A-Fa-f]{2})")
+pattern_email = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+pattern_win_user_path = re.compile(r"(?i)(C:\\Users\\[a-z0-9_-]+)")
+pattern_passwords = re.compile(r"(?i)(--password|-p|password=)\s*['\"]?([^\s'\"]+)['\"]?")
 
 # Define keywords for suspicious prediction
 class ThreatDictionary:
@@ -41,26 +44,38 @@ class ThreatDictionary:
     WEB_ATTACKS = [
         "<script>", "alert(", "onerror=", "onload=", "eval(", "src=",  # XSS
         "union select", "select *", "drop table", "insert into", "order by", "--", " ' or '1'='1", # SQLi
-        "../", "..\\", "etc/passwd", "windows/system32", "boot.ini", ".env", ".git" # Path Traversal / Info Leak
+        "../", "..\\", "etc/passwd", "windows/system32", "boot.ini", ".env", ".git", # Path Traversal / Info Leak
+        "jndi:ldap", "jndi:rmi", # NEW: Log4j exploits
+        "wp-admin", "wp-login",  # NEW: WordPress brute force/scanning
+        "whoami", "ifconfig", "ipconfig" # NEW: Command execution output
     ]
     
     # 2. Authentication & Account Security (Brute Force)
     AUTH_ATTACKS = [
         "failed password", "invalid user", "authentication failure", "unauthorized",
-        "login failed", "access denied", "bad password", "locked out", "user not found"
+        "login failed", "access denied", "bad password", "locked out", "user not found", "4625", # Windows Failed Logon
+        "maximum authentication attempts exceeded", # NEW: Linux aggressive brute force
+        "preauth", # NEW: SSH pre-authentication failures
+        "4740" # NEW: Windows: User Account Locked Out
     ]
     
     # 3. System & Malware Indicators (Post-Exploitation)
     SYSTEM_ATTACKS = [
         "rm -rf", "sudo", "chmod", "chown", "wget ", "curl ", "netcat", "nc -e", # Command Injection
         "compromised", "unexpected service", "malicious", "backdoor", "shell",
-        "powershell", "base64", "python -c", "perl -e" # Common script execution
+        "powershell", "base64", "python -c", "perl -e", # Common script execution
+        "4720", "4732", "1102", "7045", "vssadmin delete shadows", 
+        "lsass.exe", "invoke-expression", # Windows specific
+        "certutil.exe -urlcache", "certutil.exe -split", # NEW: Often used by malware to download payloads
+        "schtasks /create", "bitsadmin", # NEW: Windows persistence mechanisms
+        "disableantispyware", "reg add" # NEW: Tampering with Windows Defender/Registry
     ]
 
     # 4. Network Scanning & Reconnaissance (Probing)
     RECON = [
         "nmap", "masscan", "dirbuster", "nikto", "sqlmap", "iptables-dropped", 
-        "connection refused", "port scan", "icmp", "test packet"
+        "connection refused", "port scan", "icmp", "test packet",
+        "zgrab", "nessus", "acunetix", "w3af" # NEW: Common automated vulnerability scanners
     ]
 
     @classmethod
@@ -71,16 +86,31 @@ class ThreatDictionary:
 SUSPICIOUS_KEYWORDS = ThreatDictionary.get_all()
 
 # list of patterns that are noisy but safe
-# Expanded to include more background noise common in Linux/Web servers
+# Expanded to aggressively filter out normal Windows and Linux background noise   
 KNOWN_SAFE_PATTERNS = [
+    # Linux / Unix Noise
     "session opened", "session closed", "systemd: started", "ntpdate", 
     "authorized_keys", "cron[", "postfix/", "dovecot:", "crond[", 
     "reached target", "pms-refresh", "status=sent (250 2.0.0 ok", 
-    "starting update inventory", "connection closed by authenticating user"
+    "starting update inventory", "connection closed by authenticating user",
+    "removed slice", "created slice", "starting session", "started session", # Systemd slice spam
+    "pam_unix(cron:session)", "dhcpack", "dhcpdiscover", # DHCP and Cron spam
+    
+    # Windows Noise
+    "4624", # Windows: Successful Logon (EXTREMELY NOISY)
+    "4634", # Windows: Successful Logoff
+    "4672", # Windows: Special privileges assigned to new logon (Noisy for admin accounts)
+    "5140", # Windows: A network share object was accessed
+    "5156", # Windows: Windows Filtering Platform has allowed a connection
+    "service control manager", "system idle process", 
+    
+    # Web / Network Noise
+    "favicon.ico", "robots.txt", # Standard web crawler requests
+    "\"get / http/1.1\" 200", "\"get / http/1.0\" 200" # Basic successful web loads
 ]
 
 # adding batching for brute force to reduce lines being parsed to llm at once
-BATCH_LIMIT = 20 # Number of suspicious lines to collect before calling LLM
+BATCH_LIMIT = 1000 # Number of suspicious lines to collect before calling LLM
 MAX_WAIT_SECONDS = 300 # 5 minutes 
 last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
@@ -313,23 +343,46 @@ def log_sanitiser(new_lines, file_name_only):
     #     lines = f.readlines()
 
     for line in new_lines: #extract each line of the log file individually
+        try:
+            # Parse the line as JSON (for Winlogbeat .ndjson files)
+            log_data = json.loads(line)
+            
+            # Extract the human-readable message. 
+            # If 'message' isn't there, dump the 'winlog' object to a string
+            text_to_analyze = log_data.get("message", "")
+            if not text_to_analyze:
+                text_to_analyze = json.dumps(log_data.get("winlog", log_data))
+                
+        except json.JSONDecodeError:
+            # If it fails (because it's an old plain text .log file), just use the line directly
+            text_to_analyze = line
         if not line.strip(): continue # skips any lines that are empty
-        if "CRON" in line and "CMD" in line: continue # Bins the pointless background traffic to save llm credits
-        if is_noise(line): continue # Ignore 
+        if "CRON" in text_to_analyze and "CMD" in text_to_analyze: continue # Bins the pointless background traffic to save llm credits
+        if is_noise(text_to_analyze): continue # Ignore 
 
-        suspicious_flag = is_suspicious(line)
+        suspicious_flag = is_suspicious(text_to_analyze)
         analysis_status = "pending" if suspicious_flag else "ignored_low_risk"
 
         #sanitisation
         # remove mac address entirely for same reason as ip
-        macs = re.findall(pattern_mac, line) # find and store before redacting the text, same as ips
-        sanitised_line = re.sub(pattern_mac, "[MAC_REDACTED]", line) # repalce all mac oocurances with redacted text
+        macs = re.findall(pattern_mac, text_to_analyze) # find and store before redacting the text, same as ips
+        sanitised_line = re.sub(pattern_mac, "[MAC_REDACTED]", text_to_analyze) # repalce all mac oocurances with redacted text
+        # New System-Level Sanitisation
+        sanitised_line = re.sub(pattern_email, "[EMAIL_REDACTED]", sanitised_line)
+        # sanitised_line = re.sub(pattern_win_user_path, "[WINDOWS_USER_DIR]", sanitised_line)
+        sanitised_line = re.sub(pattern_passwords, "[PASSWORD_REDACTED]", sanitised_line)
 
-        ips = re.findall(pattern_ip, sanitised_line)#regex to find ips first
+        # Extract both IPv4 and IPv6 addresses
+        ips_v4 = re.findall(pattern_ip, sanitised_line)
+        ips_v6 = re.findall(pattern_ipv6, sanitised_line)
+
         # Use a set to get unique IPs, then sort them to ensure consistentcy 
-        unique_ips = sorted(list(set(ips)))
-        # Separate into two lists
-        internal_ips = [ip for ip in unique_ips if ip.startswith(("192.168.", "10."))]
+        # and combine both ips into a single unique list
+        unique_ips = sorted(list(set(ips_v4 + ips_v6)))
+        # Define all internal prefixes (both v4 and v6)
+        internal_prefixes = ("192.168.", "10.", "172.", "fc", "fd", "fe80", "::1", "127.0.0.1")
+        # Separate into internal and external lists by checking the prefix
+        internal_ips = [ip for ip in unique_ips if ip.lower().startswith(internal_prefixes)]
         external_ips = [ip for ip in unique_ips if ip not in internal_ips]
 
         # External IPs now starting from 0

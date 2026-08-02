@@ -24,7 +24,7 @@ def verify_integrity(stored_hash, event_id, text, timestamp):
 def get_incidents(): 
     incidents = []
 
-    docs = db.collection("incidents").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(100).stream()
+    docs = db.collection("incidents").order_by("timestamp", direction=firestore.Query.DESCENDING).stream()
 
 
     for doc in docs:
