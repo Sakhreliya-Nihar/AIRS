@@ -164,19 +164,23 @@ def get_ai_persona():
     # Define the 3 distinct personalities
     prompts = {
         "business_owner": (
-            "Analyze these logs for a non-technical business owner. "
-            "Avoid jargon. Focus on: Is this dangerous? Do I need to panic? "
-            "For the recommendation, tell them simply who to contact or if they can ignore it."
+            "Analyze these logs for a non-technical Business Owner (SME). "
+            "Your goal is to provide absolute clarity without technical jargon. "
+            "For the 'summary': Explain exactly what happened, if it is dangerous, and what the direct business impact is. "
+            "For the 'mitigation_steps': Provide actionable, plain-English steps. You MUST explain exactly *what* each step does and *why* it is necessary. "
+            "If a step requires IT help, tell them exactly what to ask their IT provider to do (e.g., 'Ask your IT team to block the attacker's IP address. This stops the hacker from attempting further logins.')."
         ),
         "it_support": (
             "Analyze these logs for a Junior IT Sysadmin. "
-            "Use standard IT terminology. Focus on: What service is failing? Is it a user error or a bug? "
-            "For the recommendation, suggest specific actions like 'Reset User Password', 'Check Firewall', or 'Restart Service'."
+            "Use standard IT terminology. Focus on what service is failing, whether it's user error or a bug, and how to fix it. "
+            "For the 'summary': Detail the technical issue clearly. "
+            "For the 'mitigation_steps': Provide specific actions. Include exact CLI commands (e.g., 'sudo systemctl restart nginx') where applicable, but you MUST briefly explain what the command achieves so the junior admin learns from the process."
         ),
         "soc_analyst": (
             "Analyze these logs for a Senior Security Analyst (SOC). "
-            "Be extremely technical. Focus on: Attack vectors, specific payload analysis (SQLi/XSS patterns), and Indicators of Compromise (IOCs). "
-            "For the recommendation, provide specific remediation commands (e.g., 'Block IP x via iptables', 'Patch CVE-2023-xxx')."
+            "Be extremely technical. Focus on attack vectors, payload analysis (SQLi/XSS patterns), and Indicators of Compromise (IOCs). "
+            "For the 'summary': Provide a deep dive into the threat mechanics. "
+            "For the 'mitigation_steps': Provide exact, advanced remediation commands (e.g., specific iptables drops, patching CVEs) and long-term architectural recommendations."
         )
     }
     return prompts.get(level, prompts["business_owner"])
@@ -226,29 +230,32 @@ def process_batch(batch_list):
             LOGS:
             {combined_text}
             
-            INSTRUCTIONS FOR MITIGATION:
-            You are an IT Administrator. 
-            For 'mitigation_steps', do NOT give generic advice like "Contact IT". 
-            Instead, provide specific CLI commands or exact actions based on the log content.
+            You must strictly return ONLY a JSON list of objects matching the exact structure below. 
+            Do not include markdown formatting like ```json outside of the actual JSON output.
 
-            Examples:
-            - If an IP is attacking: "Run: sudo iptables -A INPUT -s [The_IP_Address] -j DROP"
-            - If a user is compromised: "Run: sudo passwd -l [The_Username]"
-            - If a service is failing: "Run: sudo systemctl restart [Service_Name]"
-
-            Return ONLY a JSON list of objects:
             [
-              {{ 
+              { 
                 "event_id": "the_original_id",
-                "summary": "Short explanation of what happened", 
-                "mitigation_steps": [
-                    "Step 1 (Valuable Info, like Who to contact)",
-                    "Step 2 (Specific Command)",
-                    "Step 3 (Configuration Change)",
-                    "Step 4 (Verification Step)"
+                "analysis": {
+                "incident_overview": "A thorough, detailed explanation of exactly what happened.",
+                "business_impact": "The real-world consequence of this event (e.g., downtime, data breach, none).",
+                "technical_root_cause": "The specific technical mechanism, vulnerability, or error that triggered this."
+                },
+                "mitigation_plan": [
+                {
+                    "step_number": 1,
+                    "action_title": "A clear, concise title for this step.",
+                    "who_should_execute": "Specify who should do this (e.g., 'Business Owner', 'External IT Provider', 'Network Engineer').",
+                    "detailed_instructions": "Exact, step-by-step instructions. For IT/SOC, include specific CLI commands. For Business Owners, include exactly what to tell their IT team.",
+                    "why_this_is_necessary": "A deep explanation of what this specific action achieves and the risk of NOT doing it."
+                }
                 ],
-                "risk_score": 1-10 
-              }}
+                "risk_assessment": {
+                "score": <integer between 1 and 10>,
+                "severity": "<Critical, High, Medium, or Low>",
+                "justification": "A detailed reason why this specific score and severity were assigned based on the log evidence."
+                }
+            }
             ] 
             """
         )
@@ -276,8 +283,18 @@ def process_batch(batch_list):
             
             if event_id in results_map and doc_id:
                 res = results_map[event_id]
-                risk = res['risk_score']
-                summary = res['summary']
+                risk = res.get("risk_assessment", {}).get("score", 1)
+                summary = res.get("analysis", {}).get("incident_overview", "No summary provided.")
+
+                raw_steps = res.get("mitigation_plan", [])
+                formatted_steps = [
+                    f"Step {step.get('step_number', '?')}: {step.get('action_title', 'Action')} - {step.get('detailed_instructions', '')}" 
+                    for step in raw_steps
+                ]
+
+                # Provide a fallback if the LLM hallucinated an empty list
+                if not formatted_steps:
+                    formatted_steps = ["Review logs manually"]
                 # Encrypt the INDIVIDUAL insight
                 encrypted_insights = encrypt_payload({
                     "summary": summary,
