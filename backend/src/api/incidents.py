@@ -1,20 +1,26 @@
-from fastapi import APIRouter, HTTPException, Body # Add HTTPException
-from services.firestore import get_incidents, db # Import db from your firestore service
+from fastapi import APIRouter, HTTPException, Body
+from services.firestore import get_incidents, db
 from pydantic import BaseModel
-import firebase_admin.firestore as firestore # Needed for firestore.ArrayUnion
+import firebase_admin.firestore as firestore 
 
 from security.crypto import encrypt_payload
-router = APIRouter(prefix="/api/incidents", tags=["Incidents"]) # every route defined will start with this path. 
 
 
-@router.get("") # trigger function when a GET is made
-def fetch_incidents():
-    return get_incidents() # imports the incidents from firestore.py 
+
+# Removed the prefix here to create /api/incidents and /api/users
+router = APIRouter(tags=["API Routes"]) 
 
 class NoteRequest(BaseModel):
     note: str
 
-@router.patch("/{doc_id}/resolve")
+class AssignRequest(BaseModel):
+    assigned_to: str
+
+@router.get("/api/incidents") 
+def fetch_incidents():
+    return get_incidents() 
+
+@router.patch("/api/incidents/{doc_id}/resolve")
 def resolve_incident(doc_id: str):
     try:
         db.collection("incidents").document(doc_id).update({
@@ -24,14 +30,14 @@ def resolve_incident(doc_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{doc_id}/notes")
+@router.post("/api/incidents/{doc_id}/notes")
 def add_note(doc_id: str, request: NoteRequest):
     try:
 
-        # Encrypt the plain text note first
+
         encrypted_note = encrypt_payload(request.note)
 
-        # Use ArrayUnion so we don't overwrite previous notes
+
         db.collection("incidents").document(doc_id).update({
             "user_notes": firestore.ArrayUnion([encrypted_note])
         })
@@ -44,8 +50,35 @@ async def update_mitigation_progress(doc_id: str, completed_steps: list[int] = B
     """Saves the list of checked boxes (by index) to Firestore"""
     try:
         doc_ref = db.collection("incidents").document(doc_id)
-        # saves an array of integers representing the indexes of checked items (e.g., [0, 2])
+
         doc_ref.update({"completed_steps": completed_steps})
         return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/api/incidents/{doc_id}/assign")
+def assign_incident(doc_id: str, request: AssignRequest):
+    """Saves the assigned user to Firestore"""
+    try:
+        db.collection("incidents").document(doc_id).update({
+            "assigned_to": request.assigned_to
+        })
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/api/users")
+def fetch_users():
+    """Fetches all users for the frontend dropdown"""
+    try:
+        users_ref = db.collection("users").stream()
+        users_list = []
+        for doc in users_ref:
+            user_data = doc.to_dict()
+            user_data["id"] = doc.id 
+            users_list.append(user_data)
+        
+        return users_list
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
