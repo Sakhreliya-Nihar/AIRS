@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
-import { Save, Shield, Briefcase, Wrench, LogOut, User, AlertTriangle, Bell, BellOff, MailWarning, Zap } from "lucide-react";
+import { Save, Shield, Briefcase, Wrench, LogOut, User, AlertTriangle, Bell, BellOff, MailWarning, Zap, Layout, BellRing } from "lucide-react";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { signOut, deleteUser } from "firebase/auth";
 
 export default function Settings() {
     const [techLevel, setTechLevel] = useState("business_owner");
-    // --- NEW: Notification State ---
     const [notificationLevel, setNotificationLevel] = useState("critical");
+    // --- NEW: In-App Notification State ---
+    const [appNotificationLevel, setAppNotificationLevel] = useState("high");
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
@@ -22,8 +23,9 @@ export default function Settings() {
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     if (data.tech_level) setTechLevel(data.tech_level);
-                    // Load saved notification preference
                     if (data.notification_level) setNotificationLevel(data.notification_level);
+                    // Load saved in-app notification preference
+                    if (data.app_notification_level) setAppNotificationLevel(data.app_notification_level);
                 }
             } catch (err) {
                 console.error("Failed to load settings:", err);
@@ -41,10 +43,11 @@ export default function Settings() {
 
         setSaving(true);
         try {
-            // Save BOTH preferences to Firestore
+            // Save ALL preferences to Firestore
             await setDoc(doc(db, "users", user.uid), {
                 tech_level: techLevel,
-                notification_level: notificationLevel
+                notification_level: notificationLevel,
+                app_notification_level: appNotificationLevel
             }, { merge: true });
 
             alert("Account preferences updated successfully!");
@@ -109,26 +112,24 @@ export default function Settings() {
         </div>
     );
 
-
-    // Helper component for Notification Cards
-    const NotificationCard = ({ id, label, icon: Icon, description, colorClass }: any) => (
+    // Refactored Helper component for Notification Cards (Reusable)
+    const NotificationCard = ({ id, label, icon: Icon, description, colorClass, selectedValue, onSelect }: any) => (
         <div
-            onClick={() => setNotificationLevel(id)}
-            className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex items-center gap-4 ${notificationLevel === id
+            onClick={() => onSelect(id)}
+            className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex items-center gap-4 ${selectedValue === id
                 ? `border-${colorClass}-500 bg-${colorClass}-50`
                 : "border-slate-200 hover:border-slate-300 bg-white"
                 }`}
         >
-            <div className={`p-2 rounded-lg ${notificationLevel === id ? `bg-${colorClass}-500 text-white` : "bg-slate-100 text-slate-500"}`}>
+            <div className={`p-2 rounded-lg ${selectedValue === id ? `bg-${colorClass}-500 text-white` : "bg-slate-100 text-slate-500"}`}>
                 <Icon size={20} />
             </div>
             <div>
-                <h3 className={`font-bold text-sm ${notificationLevel === id ? `text-${colorClass}-900` : "text-slate-700"}`}>{label}</h3>
+                <h3 className={`font-bold text-sm ${selectedValue === id ? `text-${colorClass}-900` : "text-slate-700"}`}>{label}</h3>
                 <p className="text-xs text-slate-500 mt-0.5">{description}</p>
             </div>
         </div>
     );
-
 
     return (
         <div className="p-8 max-w-4xl mx-auto space-y-8">
@@ -149,7 +150,7 @@ export default function Settings() {
                     <LevelCard id="soc_analyst" label="SOC Analyst" icon={Shield} description="Deep technical dive. Analyzes raw payloads, attack vectors, and IOCs." />
                 </div>
 
-                {/* --- NEW: Email Notifications Section --- */}
+                {/* Email Notifications Section */}
                 <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2 pt-6 border-t border-slate-100">
                     <Bell size={20} className="text-indigo-500" />
                     Email Notifications
@@ -162,6 +163,8 @@ export default function Settings() {
                         icon={Bell}
                         colorClass="indigo"
                         description="Get an email for every single security event."
+                        selectedValue={notificationLevel}
+                        onSelect={setNotificationLevel}
                     />
                     <NotificationCard
                         id="high"
@@ -169,6 +172,8 @@ export default function Settings() {
                         icon={Zap}
                         colorClass="orange"
                         description="Only notify me for risk scores of 6 and above."
+                        selectedValue={notificationLevel}
+                        onSelect={setNotificationLevel}
                     />
                     <NotificationCard
                         id="critical"
@@ -176,6 +181,8 @@ export default function Settings() {
                         icon={MailWarning}
                         colorClass="red"
                         description="Only email me for absolute emergencies (Score 8+)."
+                        selectedValue={notificationLevel}
+                        onSelect={setNotificationLevel}
                     />
                     <NotificationCard
                         id="none"
@@ -183,6 +190,53 @@ export default function Settings() {
                         icon={BellOff}
                         colorClass="slate"
                         description="Turn off all email alerts. I'll check the dashboard."
+                        selectedValue={notificationLevel}
+                        onSelect={setNotificationLevel}
+                    />
+                </div>
+
+                {/* --- NEW: In-App Notifications Section --- */}
+                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2 pt-6 border-t border-slate-100">
+                    <Layout size={20} className="text-indigo-500" />
+                    In-App Dashboard Alerts
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                    <NotificationCard
+                        id="medium"
+                        label="Medium & Above"
+                        icon={BellRing}
+                        colorClass="yellow"
+                        description="Show banners for Medium, High, and Critical alerts."
+                        selectedValue={appNotificationLevel}
+                        onSelect={setAppNotificationLevel}
+                    />
+                    <NotificationCard
+                        id="high"
+                        label="High & Critical Only"
+                        icon={Zap}
+                        colorClass="orange"
+                        description="Show banners for risk scores of 6 and above."
+                        selectedValue={appNotificationLevel}
+                        onSelect={setAppNotificationLevel}
+                    />
+                    <NotificationCard
+                        id="critical"
+                        label="Critical Only"
+                        icon={AlertTriangle}
+                        colorClass="red"
+                        description="Only show top banners for absolute emergencies."
+                        selectedValue={appNotificationLevel}
+                        onSelect={setAppNotificationLevel}
+                    />
+                    <NotificationCard
+                        id="none"
+                        label="Disabled"
+                        icon={BellOff}
+                        colorClass="slate"
+                        description="Hide all pop-up banners. I'll check the table."
+                        selectedValue={appNotificationLevel}
+                        onSelect={setAppNotificationLevel}
                     />
                 </div>
 
@@ -238,4 +292,3 @@ export default function Settings() {
             </div>
         </div>
     );
-}

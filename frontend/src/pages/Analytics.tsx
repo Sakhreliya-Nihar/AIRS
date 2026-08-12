@@ -72,7 +72,6 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, color, icon: Icon, tr
 
 /* ---------- Main Component ---------- */
 export default function Analytics() {
-    // Strongly typed state
     const [incidents, setIncidents] = useState<Incident[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -192,96 +191,120 @@ export default function Analytics() {
     }, [filteredIncidents]);
 
     const trendData = useMemo(() => {
-        let intervals = 7;
-        let intervalType = 'day';
+        if (!incidents.length) return [];
+
+        // Helper to safely parse dates from API payload
+        const parseDate = (ts: any) => {
+            if (!ts) return new Date();
+            if (ts.seconds) return new Date(ts.seconds * 1000);
+            const d = new Date(ts);
+            return isNaN(d.getTime()) ? new Date() : d;
+        };
+
+        let start = new Date();
+        let end = new Date();
+        let bucketFormat: 'minute' | 'hour' | 'day' | 'month' = 'day';
 
         if (selectedRange === 'hour') {
-            intervals = 12;
-            intervalType = 'minute';
+            start.setHours(start.getHours() - 1);
+            bucketFormat = 'minute';
         } else if (selectedRange === 'day') {
-            intervals = 24;
-            intervalType = 'hour';
+            start.setHours(start.getHours() - 24);
+            bucketFormat = 'hour';
         } else if (selectedRange === 'week') {
-            intervals = 7;
-            intervalType = 'day';
+            start.setDate(start.getDate() - 7);
+            bucketFormat = 'day';
         } else if (selectedRange === 'month') {
-            intervals = 30;
-            intervalType = 'day';
+            start.setDate(start.getDate() - 30);
+            bucketFormat = 'day';
         } else if (selectedRange === 'year') {
-            intervals = 12;
-            intervalType = 'month';
-        } else if (selectedRange === 'custom' && customStartDate && customEndDate) {
-            const start = new Date(customStartDate);
-            const end = new Date(customEndDate);
-            const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-
-            if (daysDiff <= 1) {
-                intervals = 24;
-                intervalType = 'hour';
-            } else if (daysDiff <= 7) {
-                intervals = daysDiff;
-                intervalType = 'day';
-            } else if (daysDiff <= 60) {
-                intervals = daysDiff;
-                intervalType = 'day';
-            } else {
-                intervals = Math.ceil(daysDiff / 30);
-                intervalType = 'month';
-            }
+            start.setFullYear(start.getFullYear() - 1);
+            bucketFormat = 'month';
+        } else if (selectedRange === 'all') {
+            const times = incidents.map(i => parseDate(i.timestamp).getTime());
+            start = new Date(Math.min(...times));
+            const daysDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+            if (daysDiff <= 2) bucketFormat = 'hour';
+            else if (daysDiff <= 90) bucketFormat = 'day';
+            else bucketFormat = 'month';
+        } else if (selectedRange === 'custom') {
+            start = new Date(customStartDate || Date.now());
+            end = new Date(customEndDate || Date.now());
+            end.setHours(23, 59, 59, 999);
+            const daysDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
+            if (daysDiff <= 2) bucketFormat = 'hour';
+            else if (daysDiff <= 90) bucketFormat = 'day';
+            else bucketFormat = 'month';
         }
 
-        return [...Array(intervals)].map((_, i) => {
-            const targetDate = new Date();
+        // Safety fallback for corrupted old dates (e.g. Unix epoch 1970)
+        if (start.getFullYear() < 2000) {
+            start = new Date();
+            start.setFullYear(start.getFullYear() - 1);
+            bucketFormat = 'month';
+        }
 
-            if (intervalType === 'minute') {
-                targetDate.setMinutes(targetDate.getMinutes() - ((intervals - 1 - i) * 5));
-            } else if (intervalType === 'hour') {
-                targetDate.setHours(targetDate.getHours() - (intervals - 1 - i));
-            } else if (intervalType === 'day') {
-                targetDate.setDate(targetDate.getDate() - (intervals - 1 - i));
-            } else if (intervalType === 'month') {
-                targetDate.setMonth(targetDate.getMonth() - (intervals - 1 - i));
+        // Creates consistent map keys (e.g., "2024-03-01T14") to aggregate attacks securely
+        const getBucketKey = (d: Date, format: string) => {
+            const yr = d.getFullYear();
+            const mo = String(d.getMonth() + 1).padStart(2, '0');
+            const dy = String(d.getDate()).padStart(2, '0');
+            const hr = String(d.getHours()).padStart(2, '0');
+            const mi = String(Math.floor(d.getMinutes() / 5) * 5).padStart(2, '0');
+
+            if (format === 'minute') return `${yr}-${mo}-${dy}T${hr}:${mi}`;
+            if (format === 'hour') return `${yr}-${mo}-${dy}T${hr}`;
+            if (format === 'day') return `${yr}-${mo}-${dy}`;
+            if (format === 'month') return `${yr}-${mo}`;
+            return `${yr}-${mo}-${dy}`;
+        };
+
+        const buckets = new Map<string, { label: string, attacks: number }>();
+
+        // Pre-fill the buckets to guarantee continuous lines (no gaps in the graph)
+        let current = new Date(start);
+        if (bucketFormat === 'minute') current.setMinutes(Math.floor(current.getMinutes() / 5) * 5, 0, 0);
+        else if (bucketFormat === 'hour') current.setMinutes(0, 0, 0);
+        else if (bucketFormat === 'day') current.setHours(0, 0, 0, 0);
+        else if (bucketFormat === 'month') { current.setDate(1); current.setHours(0, 0, 0, 0); }
+
+        while (current <= end) {
+            const key = getBucketKey(current, bucketFormat);
+            let label = '';
+
+            if (bucketFormat === 'minute' || bucketFormat === 'hour') {
+                label = current.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } else if (bucketFormat === 'day') {
+                label = current.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+            } else if (bucketFormat === 'month') {
+                label = current.toLocaleDateString([], { month: 'short', year: '2-digit' });
             }
 
-            const count = filteredIncidents.filter(inc => {
-                const incDate = inc.timestamp?.seconds
-                    ? new Date(inc.timestamp.seconds * 1000)
-                    : new Date(inc.timestamp);
+            buckets.set(key, { label, attacks: 0 });
 
-                if (isNaN(incDate.getTime())) return false;
+            if (bucketFormat === 'minute') current.setMinutes(current.getMinutes() + 5);
+            else if (bucketFormat === 'hour') current.setHours(current.getHours() + 1);
+            else if (bucketFormat === 'day') current.setDate(current.getDate() + 1);
+            else if (bucketFormat === 'month') current.setMonth(current.getMonth() + 1);
+        }
 
-                if (intervalType === 'minute') {
-                    const startOfInterval = new Date(targetDate);
-                    const endOfInterval = new Date(targetDate);
-                    endOfInterval.setMinutes(endOfInterval.getMinutes() + 5);
-                    return incDate >= startOfInterval && incDate < endOfInterval;
-                } else if (intervalType === 'hour') {
-                    return incDate.getHours() === targetDate.getHours() &&
-                        incDate.toLocaleDateString('en-CA') === targetDate.toLocaleDateString('en-CA');
-                } else if (intervalType === 'day') {
-                    return incDate.toLocaleDateString('en-CA') === targetDate.toLocaleDateString('en-CA');
-                } else if (intervalType === 'month') {
-                    return incDate.getMonth() === targetDate.getMonth() &&
-                        incDate.getFullYear() === targetDate.getFullYear();
+        // Tally the incidents into the buckets
+        incidents.forEach(inc => {
+            const d = parseDate(inc.timestamp);
+            if (d >= start && d <= end) {
+                const key = getBucketKey(d, bucketFormat);
+                if (buckets.has(key)) {
+                    buckets.get(key)!.attacks += 1;
                 }
-                return false;
-            }).length;
+            }
+        });
 
-            let label; {
-                if (intervalType === 'minute' || intervalType === 'hour') {
-                    label = targetDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                } else if (intervalType === 'day') {
-                    label = targetDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-                } else if (intervalType === 'month') {
-                    label = targetDate.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
-                }
-
-                return {
-                    date: label,
-                    attacks: count
-                };
-            });
-    }, [filteredIncidents, selectedRange, customStartDate, customEndDate]);
+        // Convert Map to an Array for Recharts
+        return Array.from(buckets.values()).map(b => ({
+            date: b.label,
+            attacks: b.attacks
+        }));
+    }, [incidents, selectedRange, customStartDate, customEndDate]);
 
     if (loading) {
         return (
@@ -368,8 +391,9 @@ export default function Analytics() {
                                         tickLine={false}
                                         tick={{ fontSize: 11, fontWeight: 700, fill: '#94a3b8' }}
                                         dy={10}
-                                        angle={selectedRange === 'year' ? 0 : -15}
-                                        textAnchor={selectedRange === 'year' ? 'middle' : 'end'}
+                                        angle={selectedRange === 'year' || selectedRange === 'all' ? 0 : -15}
+                                        textAnchor={selectedRange === 'year' || selectedRange === 'all' ? 'middle' : 'end'}
+                                        minTickGap={20}
                                     />
                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fontWeight: 700, fill: '#94a3b8' }} allowDecimals={false} />
                                     <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.05)' }} />
@@ -444,7 +468,7 @@ export default function Analytics() {
                 </div>
 
                 <p className="text-center text-[10px] font-bold text-slate-300 mt-4 uppercase tracking-[0.2em]">
-                    Security Assistant Dashboard • Interface Built by Matthew Fish
+                    Security Assistant Dashboard • Interface Built by Nihar Sakhreliya
                 </p>
             </footer>
         </div>

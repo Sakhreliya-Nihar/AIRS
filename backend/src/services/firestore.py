@@ -72,7 +72,9 @@ def get_incidents():
             "analysis_status": data.get("analysis_status", "pending"),
             "timestamp": data.get("timestamp"),
             "user_notes": decrypted_notes,
-            "is_verified": is_verified 
+            "is_verified": is_verified,
+            "completed_steps": data.get("completed_steps", []),
+            "assigned_to": data.get("assigned_to", "")
         })
 
     return incidents

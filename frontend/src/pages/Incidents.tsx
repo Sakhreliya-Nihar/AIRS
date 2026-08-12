@@ -86,6 +86,31 @@ export default function Incidents() {
             console.error("Failed to load team members", err);
         }
     };
+    // Linking Listener 
+    useEffect(() => {
+        const handleDeepLink = () => {
+            // Grab the ID from the URL (removing the # symbol)
+            const hashId = window.location.hash.replace('#', '');
+
+            if (hashId && incidents.length > 0) {
+                const foundIncident = incidents.find(inc => inc.id === hashId);
+                if (foundIncident) {
+                    // Auto-open the incident!
+                    setSelectedIncident(foundIncident);
+
+                    // Clean up the URL so it doesn't get stuck there
+                    window.history.replaceState(null, '', window.location.pathname);
+                }
+            }
+        };
+
+        // Run on initial load/incident update
+        handleDeepLink();
+
+        // Listen for hash changes if they are already ON the Incidents tab
+        window.addEventListener('hashchange', handleDeepLink);
+        return () => window.removeEventListener('hashchange', handleDeepLink);
+    }, [incidents]);
 
     // Fixed Assignment Handler
     const handleAssignUser = async (docId: string, userId: string) => {
