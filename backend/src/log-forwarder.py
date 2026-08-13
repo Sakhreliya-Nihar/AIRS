@@ -110,8 +110,8 @@ KNOWN_SAFE_PATTERNS = [
 ]
 
 # adding batching for brute force to reduce lines being parsed to llm at once
-BATCH_LIMIT = 1000 # Number of suspicious lines to collect before calling LLM
-MAX_WAIT_SECONDS = 300 # 5 minutes 
+BATCH_LIMIT = 20 # Number of suspicious lines to collect before calling LLM
+MAX_WAIT_SECONDS = 90 # 1.5 minutes 
 last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
 processed_files_announced = set() # stop the terminal spam for processed logs check
@@ -234,28 +234,28 @@ def process_batch(batch_list):
             Do not include markdown formatting like ```json outside of the actual JSON output.
 
             [
-              { 
-                "event_id": "the_original_id",
-                "analysis": {
-                "incident_overview": "A thorough, detailed explanation of exactly what happened.",
-                "business_impact": "The real-world consequence of this event (e.g., downtime, data breach, none).",
-                "technical_root_cause": "The specific technical mechanism, vulnerability, or error that triggered this."
-                },
-                "mitigation_plan": [
-                {
-                    "step_number": 1,
-                    "action_title": "A clear, concise title for this step.",
-                    "who_should_execute": "Specify who should do this (e.g., 'Business Owner', 'External IT Provider', 'Network Engineer').",
-                    "detailed_instructions": "Exact, step-by-step instructions. For IT/SOC, include specific CLI commands. For Business Owners, include exactly what to tell their IT team.",
-                    "why_this_is_necessary": "A deep explanation of what this specific action achieves and the risk of NOT doing it."
-                }
-                ],
-                "risk_assessment": {
-                "score": <integer between 1 and 10>,
-                "severity": "<Critical, High, Medium, or Low>",
-                "justification": "A detailed reason why this specific score and severity were assigned based on the log evidence."
-                }
-            }
+                  {{ 
+                    "event_id": "the_original_id",
+                    "analysis": {{
+                        "incident_overview": "A thorough, detailed explanation of exactly what happened.",
+                        "business_impact": "The real-world consequence of this event (e.g., downtime, data breach, none).",
+                        "technical_root_cause": "The specific technical mechanism, vulnerability, or error that triggered this."
+                    }},
+                    "mitigation_plan": [
+                        {{
+                            "step_number": 1,
+                            "action_title": "A clear, concise title for this step.",
+                            "who_should_execute": "Specify who should do this (e.g., 'Business Owner', 'External IT Provider', 'Network Engineer').",
+                            "detailed_instructions": "Exact, step-by-step instructions. For IT/SOC, include specific CLI commands. For Business Owners, include exactly what to tell their IT team.",
+                            "why_this_is_necessary": "A deep explanation of what this specific action achieves and the risk of NOT doing it."
+                        }}
+                    ],
+                    "risk_assessment": {{
+                        "score": <integer between 1 and 10>,
+                        "severity": "<Critical, High, Medium, or Low>",
+                        "justification": "A detailed reason why this specific score and severity were assigned based on the log evidence."
+                    }}
+                }}
             ] 
             """
         )
@@ -298,7 +298,7 @@ def process_batch(batch_list):
                 # Encrypt the INDIVIDUAL insight
                 encrypted_insights = encrypt_payload({
                     "summary": summary,
-                    "mitigation_steps": res.get('mitigation_steps', ["Review logs manually"]), # Fallback if empty
+                    "mitigation_steps": formatted_steps, # Fallback if empty
                     "risk_score": risk
                 })
                 db.collection("incidents").document(doc_id).update({
@@ -363,15 +363,25 @@ def log_sanitiser(new_lines, file_name_only):
         try:
             # Parse the line as JSON (for Winlogbeat .ndjson files)
             log_data = json.loads(line)
-            
+
+            # Extract Winlogbeat Event ID (if it exists)
+            event_id_val = str(log_data.get("winlog", {}).get("event_id", ""))
+
             # Extract the human-readable message. 
             # If 'message' isn't there, dump the 'winlog' object to a string
-            text_to_analyze = log_data.get("message", "")
-            if not text_to_analyze:
-                text_to_analyze = json.dumps(log_data.get("winlog", log_data))
+            raw_message = log_data.get("message", "")
+            if not raw_message:
+                raw_message = json.dumps(log_data.get("winlog", log_data))
+
+            # Combine them: If it's a Windows log, make sure the ID is visible to the scanner
+            if event_id_val:
+                text_to_analyze = f"EventID {event_id_val}: {raw_message}"
+            else:
+                # For any other JSON logs that aren't Windows
+                text_to_analyze = raw_message
                 
         except json.JSONDecodeError:
-            # If it fails (because it's an old plain text .log file), just use the line directly
+            # If it fails (because it's an old plain text or .ids or .log file), just use the line directly
             text_to_analyze = line
         if not line.strip(): continue # skips any lines that are empty
         if "CRON" in text_to_analyze and "CMD" in text_to_analyze: continue # Bins the pointless background traffic to save llm credits
