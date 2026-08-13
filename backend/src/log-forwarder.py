@@ -522,9 +522,7 @@ while True: # The script now runs continuously
 
             src_path = os.path.join(src_dir, file)
             
-            # --- RESTORED LOGIC: Check if we processed this file in the past ---
-            # If we have NO progress record for this file, check if we made a JSON for it already.
-            # If we did, we assume it was "fully read" in the old system.
+            # Check if the  file was processed this in the past
             if file not in file_progress:
                 # Construct the path where the JSON would be
                 output_filename = file.replace(".log", ".json").replace(".ids", ".json")
@@ -543,7 +541,6 @@ while True: # The script now runs continuously
                         continue
                     except OSError:
                         pass
-            # -------------------------------------------------------------------
 
             # Get current file size
             try:

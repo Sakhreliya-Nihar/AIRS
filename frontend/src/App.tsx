@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 
 // --- FIREBASE IMPORTS ---
-// Make sure this path points exactly to your firebase file!
 import { auth } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -62,7 +61,7 @@ function App() {
         activeItem={activePage}
       />
 
-      <main className="max-w-[1600px] mx-auto px-4 py-6">
+      <main className="max-w-400 mx-auto px-4 py-6">
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activePage === "Analytics" && <Analytics />}
           {activePage === "Incidents" && <Incidents />}

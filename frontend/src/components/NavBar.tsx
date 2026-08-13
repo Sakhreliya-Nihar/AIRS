@@ -127,7 +127,7 @@ export default function NavBar({ brandName, imageSrcPath, navItems, onSelect, ac
             await updateDoc(docRef, {
                 cleared_notifications: arrayUnion(...idsToClear)
             });
-            // The onSnapshot listener will automatically update the UI!
+            // The onSnapshot listener will automatically update the UI
         } catch (error) {
             console.error("Failed to clear notifications", error);
         }
