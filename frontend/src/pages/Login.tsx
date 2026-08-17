@@ -1,10 +1,12 @@
-// src/Login.tsx
+// src/login.tsx
 import React, { useState } from 'react';
 import { auth, db } from '../firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 
+// main authentication component for the application
 const Login: React.FC = () => {
+    // state hooks for managing form data and ui status
     const [isLogin, setIsLogin] = useState<boolean>(true);
     const [name, setName] = useState<string>('');
     const [email, setEmail] = useState<string>('');
@@ -12,25 +14,31 @@ const Login: React.FC = () => {
     const [error, setError] = useState<string>('');
     const [loading, setLoading] = useState<boolean>(false);
 
+    // handles both login and registration form submission
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        // prevent page reload on form submit
         e.preventDefault();
         setError('');
         setLoading(true);
 
+        // validate that required fields are not empty
         if (!email || !password || (!isLogin && !name)) {
-            setError('Please fill in all required fields.');
+            setError('please fill in all required fields.');
             setLoading(false);
             return;
         }
 
         try {
             if (isLogin) {
+                // authenticate existing user
                 await signInWithEmailAndPassword(auth, email, password);
 
             } else {
+                // register new user in firebase auth
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
 
+                // create a corresponding document in the users collection
                 await setDoc(doc(db, "users", user.uid), {
                     name: name,
                     email: email,
@@ -41,10 +49,13 @@ const Login: React.FC = () => {
             }
 
         } catch (err: any) {
-            console.error("Authentication error:", err);
-            const errorMessage = err.message || "An unexpected error occurred";
+            // log error and extract readable message for the user
+            console.error("authentication error:", err);
+            const errorMessage = err.message || "an unexpected error occurred";
+            // strip out the ugly prefix from firebase error strings
             setError(errorMessage.replace('Firebase: ', ''));
         } finally {
+            // disable loading state regardless of outcome
             setLoading(false);
         }
     };
@@ -62,6 +73,7 @@ const Login: React.FC = () => {
                     </p>
                 </div>
 
+                {/* conditional rendering for error messages */}
                 {error && (
                     <div className="bg-red-50 border-2 border-red-200 text-red-600 p-3 rounded-xl text-sm font-bold mb-6 text-center">
                         {error}
@@ -70,7 +82,7 @@ const Login: React.FC = () => {
 
                 <form onSubmit={handleSubmit} className="space-y-5">
 
-                    {/* Only show Name field if they are signing up */}
+                    {/* only show name field if user is signing up */}
                     {!isLogin && (
                         <div>
                             <label htmlFor="name" className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">
@@ -115,6 +127,7 @@ const Login: React.FC = () => {
                         />
                     </div>
 
+                    {/* dynamic submit button text based on current mode */}
                     <button
                         type="submit"
                         disabled={loading}
@@ -124,13 +137,14 @@ const Login: React.FC = () => {
                     </button>
                 </form>
 
-                {/* Toggle between Login and Sign Up */}
+                {/* toggle between login and sign up modes */}
                 <div className="mt-6 text-center">
                     <button
                         type="button"
                         onClick={() => {
                             setIsLogin(!isLogin);
-                            setError(''); // Clear errors when switching
+                            // clear any existing errors when switching modes
+                            setError('');
                         }}
                         className="text-sm font-bold text-gray-500 hover:text-purple-600 transition-colors"
                     >
@@ -142,5 +156,3 @@ const Login: React.FC = () => {
         </div>
     );
 };
-
-export default Login;

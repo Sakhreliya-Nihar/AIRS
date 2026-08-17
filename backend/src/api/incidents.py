@@ -2,25 +2,26 @@ from fastapi import APIRouter, HTTPException, Body
 from services.firestore import get_incidents, db
 from pydantic import BaseModel
 import firebase_admin.firestore as firestore 
-
 from security.crypto import encrypt_payload
 
-
-
-# Removed the prefix here to create /api/incidents and /api/users
-router = APIRouter(tags=["API Routes"]) 
+router = APIRouter(tags=["API Routes"]) # Initialize the router and group these endpoints under "API Routes"
 
 class NoteRequest(BaseModel):
+    """Defines the expected JSON payload for adding a note to an incident."""
     note: str
 
 class AssignRequest(BaseModel):
+    """Defines the expected JSON payload for assigning an incident to a user."""
     assigned_to: str
 
 @router.get("/api/incidents") 
+# API Endpoints
+
+@router.get("/api/incidents") # retreieves all incidients
 def fetch_incidents():
     return get_incidents() 
 
-@router.patch("/api/incidents/{doc_id}/resolve")
+@router.patch("/api/incidents/{doc_id}/resolve") # Updates the status of a specific incident to "resolved".
 def resolve_incident(doc_id: str):
     try:
         db.collection("incidents").document(doc_id).update({
@@ -30,7 +31,7 @@ def resolve_incident(doc_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/api/incidents/{doc_id}/notes")
+@router.post("/api/incidents/{doc_id}/notes") # Appends a note to a specific incident
 def add_note(doc_id: str, request: NoteRequest):
     try:
 
@@ -45,7 +46,7 @@ def add_note(doc_id: str, request: NoteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.patch("/api/incidents/{doc_id}/mitigate")
+@router.patch("/api/incidents/{doc_id}/mitigate")  # Appends a checked box to the incident
 async def update_mitigation_progress(doc_id: str, completed_steps: list[int] = Body(..., embed=True)):
     """Saves the list of checked boxes (by index) to Firestore"""
     try:
@@ -57,7 +58,7 @@ async def update_mitigation_progress(doc_id: str, completed_steps: list[int] = B
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.patch("/api/incidents/{doc_id}/assign")
+@router.patch("/api/incidents/{doc_id}/assign")  # Appends a user to an incident
 def assign_incident(doc_id: str, request: AssignRequest):
     """Saves the assigned user to Firestore"""
     try:
@@ -68,7 +69,7 @@ def assign_incident(doc_id: str, request: AssignRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/api/users")
+@router.get("/api/users") # Retrieves all users
 def fetch_users():
     """Fetches all users for the frontend dropdown"""
     try:

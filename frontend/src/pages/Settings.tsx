@@ -4,19 +4,22 @@ import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { db, auth } from "../firebase";
 import { signOut, deleteUser } from "firebase/auth";
 
+// main settings component for managing user preferences
 export default function Settings() {
+    // state for user configuration options
     const [techLevel, setTechLevel] = useState("business_owner");
     const [notificationLevel, setNotificationLevel] = useState("critical");
-    // --- NEW: In-App Notification State ---
     const [appNotificationLevel, setAppNotificationLevel] = useState("high");
     const [saving, setSaving] = useState(false);
 
+    // load existing user preferences from firestore on mount
     useEffect(() => {
         const fetchSettings = async () => {
             const user = auth.currentUser;
             if (!user) return;
 
             try {
+                // fetch the specific document matching the authenticated user's uid
                 const docRef = doc(db, "users", user.uid);
                 const docSnap = await getDoc(docRef);
 
@@ -24,76 +27,82 @@ export default function Settings() {
                     const data = docSnap.data();
                     if (data.tech_level) setTechLevel(data.tech_level);
                     if (data.notification_level) setNotificationLevel(data.notification_level);
-                    // Load saved in-app notification preference
                     if (data.app_notification_level) setAppNotificationLevel(data.app_notification_level);
                 }
             } catch (err) {
-                console.error("Failed to load settings:", err);
+                console.error("failed to load settings:", err);
             }
         };
         fetchSettings();
     }, []);
 
+    // handle pushing updated preferences back to the database
     const handleSave = async () => {
         const user = auth.currentUser;
         if (!user) {
-            alert("Authentication error: No user logged in.");
+            alert("authentication error: no user logged in.");
             return;
         }
 
         setSaving(true);
         try {
-            // Save ALL preferences to Firestore
+            // merge true ensures we only update these specific fields without overwriting other user data
             await setDoc(doc(db, "users", user.uid), {
                 tech_level: techLevel,
                 notification_level: notificationLevel,
                 app_notification_level: appNotificationLevel
             }, { merge: true });
 
-            alert("Account preferences updated successfully!");
+            alert("account preferences updated successfully!");
         } catch (e) {
             console.error(e);
-            alert("Error saving settings");
+            alert("error saving settings");
         }
         setSaving(false);
     };
 
+    // securely log the user out
     const handleLogout = async () => {
         try {
             await signOut(auth);
+            // reload forces the app to reset state and kick them back to the login screen
             window.location.reload();
         } catch (error) {
-            console.error("Error signing out:", error);
-            alert("Failed to sign out. Please try again.");
+            console.error("error signing out:", error);
+            alert("failed to sign out. please try again.");
         }
     };
 
+    // permanently delete the user account and associated data
     const handleDeleteAccount = async () => {
         const user = auth.currentUser;
         if (!user) return;
 
         const confirmDelete = window.confirm(
-            "Are you absolutely sure you want to delete your account? This action cannot be undone and will erase all your preferences."
+            "are you absolutely sure you want to delete your account? this action cannot be undone and will erase all your preferences."
         );
 
         if (confirmDelete) {
             try {
+                // first delete their custom data document in firestore
                 await deleteDoc(doc(db, "users", user.uid));
+                // then delete their actual authentication profile
                 await deleteUser(user);
-                alert("Your account has been successfully deleted.");
+                alert("your account has been successfully deleted.");
                 window.location.reload();
             } catch (error: any) {
-                console.error("Error deleting account:", error);
+                console.error("error deleting account:", error);
+                // firebase requires a fresh token for destructive actions
                 if (error.code === 'auth/requires-recent-login') {
-                    alert("For security reasons, please log out and log back in before deleting your account.");
+                    alert("for security reasons, please log out and log back in before deleting your account.");
                 } else {
-                    alert("Failed to delete account. Please try again.");
+                    alert("failed to delete account. please try again.");
                 }
             }
         }
     };
 
-    // Helper component for AI Personality Cards
+    // reusable component for selecting ai personality tiers
     const LevelCard = ({ id, label, icon: Icon, description }: any) => (
         <div
             onClick={() => setTechLevel(id)}
@@ -112,7 +121,7 @@ export default function Settings() {
         </div>
     );
 
-    // Refactored Helper component for Notification Cards (Reusable)
+    // reusable component for selecting notification thresholds
     const NotificationCard = ({ id, label, icon: Icon, description, colorClass, selectedValue, onSelect }: any) => (
         <div
             onClick={() => onSelect(id)}
@@ -145,12 +154,12 @@ export default function Settings() {
                 </h3>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                    <LevelCard id="business_owner" label="Business Owner" icon={Briefcase} description="Plain English. Focuses on risk, business impact, and whether you need to call an expert." />
-                    <LevelCard id="it_support" label="IT Support" icon={Wrench} description="Action-oriented. Suggests standard fixes, firewall rules, and password resets." />
-                    <LevelCard id="soc_analyst" label="SOC Analyst" icon={Shield} description="Deep technical dive. Analyzes raw payloads, attack vectors, and IOCs." />
+                    <LevelCard id="business_owner" label="Business Owner" icon={Briefcase} description="plain english. focuses on risk, business impact, and whether you need to call an expert." />
+                    <LevelCard id="it_support" label="IT Support" icon={Wrench} description="action-oriented. suggests standard fixes, firewall rules, and password resets." />
+                    <LevelCard id="soc_analyst" label="SOC Analyst" icon={Shield} description="deep technical dive. analyzes raw payloads, attack vectors, and iocs." />
                 </div>
 
-                {/* Email Notifications Section */}
+                {/* email notifications configuration */}
                 <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2 pt-6 border-t border-slate-100">
                     <Bell size={20} className="text-indigo-500" />
                     Email Notifications
@@ -162,7 +171,7 @@ export default function Settings() {
                         label="All Incidents"
                         icon={Bell}
                         colorClass="indigo"
-                        description="Get an email for every single security event."
+                        description="get an email for every single security event."
                         selectedValue={notificationLevel}
                         onSelect={setNotificationLevel}
                     />
@@ -171,7 +180,7 @@ export default function Settings() {
                         label="High & Critical Only"
                         icon={Zap}
                         colorClass="orange"
-                        description="Only notify me for risk scores of 6 and above."
+                        description="only notify me for risk scores of 6 and above."
                         selectedValue={notificationLevel}
                         onSelect={setNotificationLevel}
                     />
@@ -180,7 +189,7 @@ export default function Settings() {
                         label="Critical Threats Only"
                         icon={MailWarning}
                         colorClass="red"
-                        description="Only email me for absolute emergencies (Score 8+)."
+                        description="only email me for absolute emergencies (score 8+)."
                         selectedValue={notificationLevel}
                         onSelect={setNotificationLevel}
                     />
@@ -189,13 +198,13 @@ export default function Settings() {
                         label="Do Not Disturb"
                         icon={BellOff}
                         colorClass="slate"
-                        description="Turn off all email alerts. I'll check the dashboard."
+                        description="turn off all email alerts. i'll check the dashboard."
                         selectedValue={notificationLevel}
                         onSelect={setNotificationLevel}
                     />
                 </div>
 
-                {/* --- NEW: In-App Notifications Section --- */}
+                {/* in-app notifications configuration */}
                 <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2 pt-6 border-t border-slate-100">
                     <Layout size={20} className="text-indigo-500" />
                     In-App Dashboard Alerts
@@ -207,7 +216,7 @@ export default function Settings() {
                         label="Medium & Above"
                         icon={BellRing}
                         colorClass="yellow"
-                        description="Show banners for Medium, High, and Critical alerts."
+                        description="show banners for medium, high, and critical alerts."
                         selectedValue={appNotificationLevel}
                         onSelect={setAppNotificationLevel}
                     />
@@ -216,7 +225,7 @@ export default function Settings() {
                         label="High & Critical Only"
                         icon={Zap}
                         colorClass="orange"
-                        description="Show banners for risk scores of 6 and above."
+                        description="show banners for risk scores of 6 and above."
                         selectedValue={appNotificationLevel}
                         onSelect={setAppNotificationLevel}
                     />
@@ -225,7 +234,7 @@ export default function Settings() {
                         label="Critical Only"
                         icon={AlertTriangle}
                         colorClass="red"
-                        description="Only show top banners for absolute emergencies."
+                        description="only show top banners for absolute emergencies."
                         selectedValue={appNotificationLevel}
                         onSelect={setAppNotificationLevel}
                     />
@@ -234,7 +243,7 @@ export default function Settings() {
                         label="Disabled"
                         icon={BellOff}
                         colorClass="slate"
-                        description="Hide all pop-up banners. I'll check the table."
+                        description="hide all pop-up banners. i'll check the table."
                         selectedValue={appNotificationLevel}
                         onSelect={setAppNotificationLevel}
                     />

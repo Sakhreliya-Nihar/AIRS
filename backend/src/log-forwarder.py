@@ -6,7 +6,7 @@ from security.crypto import encrypt_payload
 from google.genai.types import GenerateContentConfig, SafetySetting, HarmCategory, HarmBlockThreshold
 from services.notifications import send_consolidated_email
 
-current_dir = os.path.dirname(__file__)#trying to fix pathing issues between laptop and pc
+current_dir = os.path.dirname(__file__) #fixing pathing issues between laptop and pc
 ENV_PATH = os.path.join(current_dir, ".env")
 load_dotenv(ENV_PATH)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -45,18 +45,18 @@ class ThreatDictionary:
         "<script>", "alert(", "onerror=", "onload=", "eval(", "src=",  # XSS
         "union select", "select *", "drop table", "insert into", "order by", "--", " ' or '1'='1", # SQLi
         "../", "..\\", "etc/passwd", "windows/system32", "boot.ini", ".env", ".git", # Path Traversal / Info Leak
-        "jndi:ldap", "jndi:rmi", # NEW: Log4j exploits
-        "wp-admin", "wp-login",  # NEW: WordPress brute force/scanning
-        "whoami", "ifconfig", "ipconfig" # NEW: Command execution output
+        "jndi:ldap", "jndi:rmi", #Log4j exploits
+        "wp-admin", "wp-login",  # WordPress brute force/scanning
+        "whoami", "ifconfig", "ipconfig" # Command execution output
     ]
     
     # 2. Authentication & Account Security (Brute Force)
     AUTH_ATTACKS = [
         "failed password", "invalid user", "authentication failure", "unauthorized",
         "login failed", "access denied", "bad password", "locked out", "user not found", "4625", # Windows Failed Logon
-        "maximum authentication attempts exceeded", # NEW: Linux aggressive brute force
-        "preauth", # NEW: SSH pre-authentication failures
-        "4740" # NEW: Windows: User Account Locked Out
+        "maximum authentication attempts exceeded", # Linux aggressive brute force
+        "preauth", # SSH pre-authentication failures
+        "4740" # Windows: User Account Locked Out
     ]
     
     # 3. System & Malware Indicators (Post-Exploitation)
@@ -66,16 +66,16 @@ class ThreatDictionary:
         "powershell", "base64", "python -c", "perl -e", # Common script execution
         "4720", "4732", "1102", "7045", "vssadmin delete shadows", 
         "lsass.exe", "invoke-expression", # Windows specific
-        "certutil.exe -urlcache", "certutil.exe -split", # NEW: Often used by malware to download payloads
-        "schtasks /create", "bitsadmin", # NEW: Windows persistence mechanisms
-        "disableantispyware", "reg add" # NEW: Tampering with Windows Defender/Registry
+        "certutil.exe -urlcache", "certutil.exe -split", # Often used by malware to download payloads
+        "schtasks /create", "bitsadmin", #  Windows persistence mechanisms
+        "disableantispyware", "reg add" # Tampering with Windows Defender/Registry
     ]
 
     # 4. Network Scanning & Reconnaissance (Probing)
     RECON = [
         "nmap", "masscan", "dirbuster", "nikto", "sqlmap", "iptables-dropped", 
         "connection refused", "port scan", "icmp", "test packet",
-        "zgrab", "nessus", "acunetix", "w3af" # NEW: Common automated vulnerability scanners
+        "zgrab", "nessus", "acunetix", "w3af" # Common automated vulnerability scanners
     ]
 
     @classmethod
@@ -116,10 +116,7 @@ last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
 processed_files_announced = set() # stop the terminal spam for processed logs check
 
-
-
-# --- HELPERS FOR FILE TRACKING ---
-TRACKING_FILE = os.path.join(current_dir, "log_progress.json")
+TRACKING_FILE = os.path.join(current_dir, "log_progress.json") # file tracking path
 def get_file_progress():
     """Loads the last known read position for files."""
     if os.path.exists(TRACKING_FILE):
@@ -146,7 +143,7 @@ def is_suspicious(line):
 
 def is_noise(line):
     line_lower = line.lower()
-    return any(pattern in line_lower for pattern in KNOWN_SAFE_PATTERNS)
+    return any(pattern in line_lower for pattern in KNOWN_SAFE_PATTERNS) # filters out unsuspicious logs
 
 def get_ai_persona():
     """Fetches the technical level setting from Firestore and returns a specific system prompt."""
@@ -161,7 +158,7 @@ def get_ai_persona():
         print(f"Warning: Could not fetch settings ({e}). Defaulting to Business Owner.")
         level = "business_owner"
 
-    # Define the 3 distinct personalities
+    # Define the 3 distinct personalities for ai prompt targetting
     prompts = {
         "business_owner": (
             "Analyze these logs for a non-technical Business Owner (SME). "
@@ -298,7 +295,7 @@ def process_batch(batch_list):
                 # Encrypt the INDIVIDUAL insight
                 encrypted_insights = encrypt_payload({
                     "summary": summary,
-                    "mitigation_steps": formatted_steps, # Fallback if empty
+                    "mitigation_steps": formatted_steps, 
                     "risk_score": risk
                 })
                 db.collection("incidents").document(doc_id).update({
@@ -331,7 +328,7 @@ def process_batch(batch_list):
                             "summary": summary
                         })
                         
-        # After processing ALL incidents in the batch, send ONE email per user
+        # After processing ALL incidents in the batch, send one email per user
         for email, incident_list in user_notification_batches.items():
             send_consolidated_email(email, incident_list)
 
@@ -355,9 +352,6 @@ def log_sanitiser(new_lines, file_name_only):
     global suspicious_buffer
     print(f"Processing {len(new_lines)} new lines from {file_name_only}...")
 
-    # REMOVED file opening logic since we now pass 'new_lines' directly
-    # with open(src_file, "r") as f: #open and read the raw log file
-    #     lines = f.readlines()
 
     for line in new_lines: #extract each line of the log file individually
         try:
@@ -367,7 +361,7 @@ def log_sanitiser(new_lines, file_name_only):
             # Extract Winlogbeat Event ID (if it exists)
             event_id_val = str(log_data.get("winlog", {}).get("event_id", ""))
 
-            # Extract the human-readable message. 
+            # Extract the human-readable message 
             # If 'message' isn't there, dump the 'winlog' object to a string
             raw_message = log_data.get("message", "")
             if not raw_message:

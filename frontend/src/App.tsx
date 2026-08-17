@@ -1,7 +1,7 @@
-// src/App.tsx
+// src/app.tsx
 import { useState, useEffect } from "react";
 
-// --- FIREBASE IMPORTS ---
+// firebase imports
 import { auth } from "./firebase";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -20,22 +20,25 @@ function App() {
 
   const navItems = ["Analytics", "Incidents", "Settings"];
 
-  // --- THE SECURITY GUARD ---
-  // This listens to Firebase. It automatically detects if you are logged in or out.
+  // the security guard
+  // this listens to firebase. it automatically detects if you are logged in or out.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        setIsAuthenticated(true); // Let them in
+        // let them in
+        setIsAuthenticated(true);
       } else {
-        setIsAuthenticated(false); // Kick them out
+        // kick them out
+        setIsAuthenticated(false);
       }
-      setIsCheckingAuth(false); // Stop the loading spinner
+      // Stop the loading spinner
+      setIsCheckingAuth(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // 1. Show a loading spinner while Firebase checks the browser memory for a session
+  // 1. show a loading spinner while firebase checks the browser memory for a session
   if (isCheckingAuth) {
     return (
       <div className="min-h-screen bg-[#FDFCFE] flex items-center justify-center">
@@ -44,12 +47,12 @@ function App() {
     );
   }
 
-  // 2. THE BOUNCER: If Firebase says you aren't logged in, FORCE the Login screen.
+  // 2. the bouncer: if firebase says you aren't logged in, force the login screen.
   if (!isAuthenticated) {
     return <Login />;
   }
 
-  // 3. If you make it past the bouncer, load the Dashboard!
+  // 3. if you make it past the bouncer, load the dashboard!
   return (
     <div className="min-h-screen bg-[#FDFCFE]">
 

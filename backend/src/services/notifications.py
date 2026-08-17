@@ -13,7 +13,7 @@ def send_consolidated_email(target_email, incidents):
     msg = MIMEMultipart()
     msg['From'] = sender
     msg['To'] = target_email
-    msg['Subject'] = f"🚨 SOC Batch Alert: {len(incidents)} Incidents Detected"
+    msg['Subject'] = f"SOC Batch Alert: {len(incidents)} Incidents Detected"
 
     # Create a clean HTML table for the incidents
     rows = ""
@@ -32,7 +32,7 @@ def send_consolidated_email(target_email, incidents):
     body = f"""
     <div style="font-family: sans-serif; max-width: 600px;">
         <h2 style="color: #1e293b;">Security Incident Report</h2>
-        <p style="color: #64748b;">A new batch of suspicious activity has been analyzed.</p>
+        <p style="color: #64748b;">A new batch of suspicious activity has been analysed.</p>
         
         <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
             <thead style="background-color: #f8fafc; text-align: left;">

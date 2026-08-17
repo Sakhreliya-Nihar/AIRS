@@ -2,9 +2,12 @@ import { useEffect, useState, useMemo } from "react";
 import { Search, Filter, X, Calendar, AlertTriangle, Shield, Network, FileDown, ClipboardList, ShieldCheck, UserCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+
+// api key from environment variables
 const API_KEY = import.meta.env.VITE_API_KEY
 
-/* ---------- Types ---------- */
+/* type definitions for the application data structures */
+
 interface AIInsight {
     summary: string;
     mitigation_steps: string[];
@@ -39,12 +42,14 @@ interface Incident {
 }
 
 interface TeamMember {
-    id: string; // Firestore document ID
+    id: string;
     name: string;
     email?: string;
 }
 
+// main incidents component
 export default function Incidents() {
+    // core component state
     const [incidents, setIncidents] = useState<Incident[]>([]);
     const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
     const [loading, setLoading] = useState(true);
@@ -52,25 +57,26 @@ export default function Incidents() {
     const [viewMode, setViewMode] = useState<string>("details");
     const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
 
-    // Search and filter states
+    // search and filter states
     const [searchQuery, setSearchQuery] = useState("");
     const [severityFilter, setSeverityFilter] = useState<string[]>([]);
     const [statusFilter, setStatusFilter] = useState<string[]>([]);
     const [dateRange, setDateRange] = useState({ start: "", end: "" });
     const [showFilters, setShowFilters] = useState(false);
 
-    // Consolidated useEffect: Fetches both incidents and users on load
+    // fetches both incidents and users on load
     useEffect(() => {
         console.log("Using API Key:", API_KEY);
         fetchIncidents();
         fetchTeamMembers();
     }, []);
 
-    // Reset view mode when selecting a new incident
+    // reset view mode when selecting a new incident
     useEffect(() => {
         if (selectedIncident) setViewMode("details");
     }, [selectedIncident]);
 
+    // fetch team members from the api
     const fetchTeamMembers = async () => {
         try {
             const res = await fetch("http://localhost:8000/api/users", {
@@ -86,42 +92,43 @@ export default function Incidents() {
             console.error("Failed to load team members", err);
         }
     };
-    // Linking Listener 
+
+    // linking listener for hash urls
     useEffect(() => {
         const handleDeepLink = () => {
-            // Grab the ID from the URL (removing the # symbol)
+            // grab the id from the url by removing the hash symbol
             const hashId = window.location.hash.replace('#', '');
 
             if (hashId && incidents.length > 0) {
                 const foundIncident = incidents.find(inc => inc.id === hashId);
                 if (foundIncident) {
-                    // Auto-open the incident!
+                    // auto open the incident
                     setSelectedIncident(foundIncident);
 
-                    // Clean up the URL so it doesn't get stuck there
+                    // clean up the url so it does not get stuck
                     window.history.replaceState(null, '', window.location.pathname);
                 }
             }
         };
 
-        // Run on initial load/incident update
+        // run on initial load or incident update
         handleDeepLink();
 
-        // Listen for hash changes if they are already ON the Incidents tab
+        // listen for hash changes if already on the incidents tab
         window.addEventListener('hashchange', handleDeepLink);
         return () => window.removeEventListener('hashchange', handleDeepLink);
     }, [incidents]);
 
-    // Fixed Assignment Handler
+    // handles assigning a user to an incident
     const handleAssignUser = async (docId: string, userId: string) => {
         if (!selectedIncident) return;
 
-        // 1. Optimistic Update (Update UI immediately)
+        // optimistic update to change the ui immediately
         const updatedIncident = { ...selectedIncident, assigned_to: userId };
         setSelectedIncident(updatedIncident);
         setIncidents(prev => prev.map(inc => inc.id === docId ? updatedIncident : inc));
 
-        // 2. Send to API
+        // send update to api
         try {
             const res = await fetch(`http://localhost:8000/api/incidents/${docId}/assign`, {
                 method: 'PATCH',
@@ -140,26 +147,27 @@ export default function Incidents() {
         }
     };
 
+    // handles toggling mitigation steps
     const handleToggleStep = async (docId: string, stepIndex: number) => {
         if (!selectedIncident) return;
 
-        // 1. Calculate the new state locally
+        // calculate the new state locally
         const currentSteps = selectedIncident.completed_steps || [];
         const isCompleted = currentSteps.includes(stepIndex);
 
         let newSteps;
         if (isCompleted) {
-            newSteps = currentSteps.filter(i => i !== stepIndex); // Uncheck
+            newSteps = currentSteps.filter(i => i !== stepIndex);
         } else {
-            newSteps = [...currentSteps, stepIndex]; // Check
+            newSteps = [...currentSteps, stepIndex];
         }
 
-        // 2. Optimistic Update (Update UI immediately)
+        // optimistic update for immediate ui feedback
         const updatedIncident = { ...selectedIncident, completed_steps: newSteps };
-        setSelectedIncident(updatedIncident); // Update selected view
-        setIncidents(prev => prev.map(inc => inc.id === docId ? updatedIncident : inc)); // Update list view
+        setSelectedIncident(updatedIncident);
+        setIncidents(prev => prev.map(inc => inc.id === docId ? updatedIncident : inc));
 
-        // 3. Send to API
+        // send progress to api
         try {
             await fetch(`http://localhost:8000/api/incidents/${docId}/mitigate`, {
                 method: 'PATCH',
@@ -174,6 +182,7 @@ export default function Incidents() {
         }
     };
 
+    // fetch incidents from the api
     const fetchIncidents = () => {
         fetch("http://localhost:8000/api/incidents", {
             headers: {
@@ -201,7 +210,8 @@ export default function Incidents() {
             });
     };
 
-    /* ---------- Action Handlers ---------- */
+    /* action handlers */
+
     const handleMarkResolved = async (docId: string) => {
         try {
             const res = await fetch(`http://localhost:8000/api/incidents/${docId}/resolve`, {
@@ -238,7 +248,8 @@ export default function Incidents() {
         } catch (err) { console.error(err); }
     };
 
-    /* ---------- PDF Report Generation ---------- */
+    /* pdf report generation */
+
     const generatePDFReport = () => {
         try {
             console.log("Starting PDF generation...");
@@ -249,7 +260,7 @@ export default function Incidents() {
             const margin = 20;
             let yPos = margin;
 
-            // Helper function to add page breaks
+            // helper function to add page breaks
             const checkPageBreak = (heightNeeded: number) => {
                 if (yPos + heightNeeded > pageHeight - margin) {
                     doc.addPage();
@@ -259,8 +270,8 @@ export default function Incidents() {
                 return false;
             };
 
-            // Header
-            doc.setFillColor(124, 58, 237); // Purple
+            // header styling
+            doc.setFillColor(124, 58, 237);
             doc.rect(0, 0, pageWidth, 35, 'F');
 
             doc.setTextColor(255, 255, 255);
@@ -275,7 +286,7 @@ export default function Incidents() {
 
             yPos = 50;
 
-            // Summary Section
+            // summary section
             doc.setTextColor(0, 0, 0);
             doc.setFontSize(16);
             doc.setFont('helvetica', 'bold');
@@ -304,14 +315,14 @@ export default function Incidents() {
             doc.text(`Pending: ${pendingCount}`, margin, yPos);
             yPos += 15;
 
-            // Incident Details Table
+            // incident details table
             checkPageBreak(20);
             doc.setFontSize(16);
             doc.setFont('helvetica', 'bold');
             doc.text('Incident Details', margin, yPos);
             yPos += 10;
 
-            // Prepare table data
+            // prepare table data
             const tableData = filteredIncidents.map(incident => {
                 const riskScore = incident.ai_insights?.[0]?.risk_score ?? 0;
                 const severity = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
@@ -359,7 +370,7 @@ export default function Incidents() {
 
             yPos = (doc as any).lastAutoTable.finalY + 15;
 
-            // Detailed Incident Analysis (Top 5 Critical/High)
+            // detailed incident analysis
             const criticalIncidents = filteredIncidents
                 .filter(i => (i.ai_insights?.[0]?.risk_score ?? 0) >= 6)
                 .slice(0, 5);
@@ -374,7 +385,7 @@ export default function Incidents() {
                 criticalIncidents.forEach((incident) => {
                     checkPageBreak(60);
 
-                    // Incident Header
+                    // incident header inside pdf
                     doc.setFillColor(240, 240, 240);
                     doc.rect(margin, yPos - 5, pageWidth - 2 * margin, 12, 'F');
 
@@ -388,16 +399,16 @@ export default function Incidents() {
                     doc.setFont('helvetica', 'normal');
                     doc.setTextColor(0, 0, 0);
 
-                    // Risk Score
+                    // risk score
                     const riskScore = incident.ai_insights?.[0]?.risk_score ?? 0;
                     doc.text(`Risk Score: ${riskScore}/10`, margin + 3, yPos);
                     yPos += 6;
 
-                    // Timestamp
+                    // timestamp
                     doc.text(`Detected: ${formatTimestamp(incident.timestamp)}`, margin + 3, yPos);
                     yPos += 6;
 
-                    // Summary
+                    // summary text
                     doc.setFont('helvetica', 'bold');
                     doc.text('Summary:', margin + 3, yPos);
                     yPos += 5;
@@ -412,7 +423,7 @@ export default function Incidents() {
                     });
                     yPos += 3;
 
-                    // User Notes
+                    // user notes block
                     if (incident.user_notes && incident.user_notes.length > 0) {
                         yPos += 3;
                         doc.setFont('helvetica', 'bold');
@@ -434,7 +445,7 @@ export default function Incidents() {
                 });
             }
 
-            // Footer on each page
+            // footer on each page
             const pageCount = doc.internal.pages.length - 1;
             for (let i = 1; i <= pageCount; i++) {
                 doc.setPage(i);
@@ -453,7 +464,7 @@ export default function Incidents() {
                 );
             }
 
-            // Save PDF
+            // save pdf
             const filename = `incident-report-${new Date().toISOString().split('T')[0]}.pdf`;
             console.log("Saving PDF as:", filename);
             doc.save(filename);
@@ -465,7 +476,8 @@ export default function Incidents() {
         }
     };
 
-    /* ---------- Filter and Search Logic ---------- */
+    /* filter and search logic */
+
     const getSeverityLabel = (score: number): string => {
         if (score >= 8) return "Critical";
         if (score >= 6) return "High";
@@ -481,7 +493,7 @@ export default function Incidents() {
             const summary = incident.ai_insights?.[0]?.summary || "";
             const eventText = incident.event.raw_sanitised_text || "";
 
-            // Search query filter (searches ID, summary, and event text)
+            // search query filter
             if (searchQuery) {
                 const query = searchQuery.toLowerCase();
                 const matchesId = incident.event.event_id.toLowerCase().includes(query);
@@ -494,17 +506,17 @@ export default function Incidents() {
                 }
             }
 
-            // Severity filter
+            // severity filter
             if (severityFilter.length > 0 && !severityFilter.includes(severity)) {
                 return false;
             }
 
-            // Status filter
+            // status filter
             if (statusFilter.length > 0 && !statusFilter.includes(incident.analysis_status)) {
                 return false;
             }
 
-            // Date range filter
+            // date range filter
             if (dateRange.start || dateRange.end) {
                 const incidentDate = incident.timestamp?.seconds
                     ? new Date(incident.timestamp.seconds * 1000)
@@ -599,7 +611,7 @@ export default function Incidents() {
         return (
             <div className="min-h-screen bg-linear-to-br from-purple-50 to-blue-50 p-8">
                 <div className="max-w-5xl mx-auto">
-                    {/* Header */}
+                    {/* header navigation */}
                     <div className="mb-8 flex items-center justify-between">
                         <button
                             onClick={() => setSelectedIncident(null)}
@@ -612,7 +624,7 @@ export default function Incidents() {
                         </h1>
                     </div>
 
-                    {/* Investigation Panel */}
+                    {/* investigation panel */}
                     <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-100 p-8 space-y-8">
                         <div className={`p-4 rounded-2xl border-2 flex items-center gap-3 ${selectedIncident.is_verified
                             ? "bg-green-50 border-green-100 text-green-700"
@@ -629,7 +641,8 @@ export default function Incidents() {
                                     : "Security Alert: Log integrity check failed - Potential tampering detected"}
                             </span>
                         </div>
-                        {/* Incident Header */}
+
+                        {/* incident detail header */}
                         <div className="flex items-start justify-between">
                             <div>
                                 <h2 className="text-2xl font-black text-gray-800 mb-2">
@@ -658,7 +671,7 @@ export default function Incidents() {
                                 className="flex-1 bg-white border-2 border-gray-200 rounded-lg px-3 py-2 text-sm font-medium focus:border-purple-500 outline-none transition-all cursor-pointer"
                             >
                                 <option value="">Unassigned</option>
-                                {/* Map over the dynamic state instead of the hardcoded array */}
+                                {/* map over team members */}
                                 {teamMembers.map(member => (
                                     <option key={member.id} value={member.id}>
                                         {member.name} {member.email ? `(${member.email})` : ''}
@@ -667,9 +680,10 @@ export default function Incidents() {
                             </select>
                         </div>
 
-                        {/* Mitigation / Details Switcher */}
+
+                        {/* mitigation and details switcher */}
                         {viewMode === "mitigation" ? (
-                            /* --- MITIGATION VIEW --- */
+                            /* mitigation view */
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
                                 <div className="bg-indigo-50 p-6 rounded-2xl border-2 border-indigo-100 mb-6">
                                     <h3 className="text-lg font-black text-indigo-900 mb-2 flex items-center gap-2">
@@ -682,21 +696,21 @@ export default function Incidents() {
 
                                     <div className="space-y-3">
                                         {selectedIncident.ai_insights?.[0]?.mitigation_steps?.map((step, idx) => {
-                                            // Check if this specific index is inside completed_steps array
+                                            // check if this step is completed
                                             const isChecked = selectedIncident.completed_steps?.includes(idx) || false;
 
                                             return (
                                                 <label
                                                     key={idx}
                                                     className={`flex items-start gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all shadow-sm ${isChecked
-                                                        ? "bg-indigo-100 border-indigo-300" // Darker style when checked
+                                                        ? "bg-indigo-100 border-indigo-300"
                                                         : "bg-white border-indigo-50 hover:border-indigo-200"
                                                         }`}
                                                 >
                                                     <input
                                                         type="checkbox"
-                                                        checked={isChecked} // Controlled component
-                                                        onChange={() => handleToggleStep(selectedIncident.id, idx)} // Call our new handler
+                                                        checked={isChecked}
+                                                        onChange={() => handleToggleStep(selectedIncident.id, idx)}
                                                         className="w-5 h-5 mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                                     />
                                                     <span className={`text-sm font-medium leading-relaxed ${isChecked ? "text-indigo-800 line-through decoration-indigo-400" : "text-slate-700"
@@ -717,12 +731,12 @@ export default function Incidents() {
                                 </button>
                             </div>
                         ) : (
-                            /* --- DETAILS VIEW (Wrapped) --- */
+                            /* details view */
                             <>
-                                {/* AI Analysis */}
+                                {/* ai analysis section */}
                                 {selectedIncident.ai_insights && selectedIncident.ai_insights[0] && (
                                     <div className="space-y-6">
-                                        {/* Risk Score */}
+                                        {/* risk score visualizer */}
                                         <div>
                                             <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Risk Score</h3>
                                             <div className="flex items-center gap-4">
@@ -739,7 +753,7 @@ export default function Incidents() {
                                             </div>
                                         </div>
 
-                                        {/* Summary */}
+                                        {/* ai generated summary */}
                                         <div>
                                             <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">AI Summary</h3>
                                             <p className="text-gray-700 leading-relaxed">{selectedIncident.ai_insights[0].summary}</p>
@@ -747,7 +761,7 @@ export default function Incidents() {
                                     </div>
                                 )}
 
-                                {/* Raw Event Data */}
+                                {/* raw event data container */}
                                 <div>
                                     <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Raw Event Data</h3>
                                     <div className="bg-gray-50 rounded-xl p-4 border-2 border-gray-100">
@@ -755,7 +769,7 @@ export default function Incidents() {
                                     </div>
                                 </div>
 
-                                {/* Technical Details */}
+                                {/* technical details grid */}
                                 {selectedIncident.event.technical_details && (
                                     <div>
                                         <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -785,7 +799,7 @@ export default function Incidents() {
                                     </div>
                                 )}
 
-                                {/* User Notes */}
+                                {/* user notes list */}
                                 <div>
                                     <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Investigation Notes</h3>
                                     {selectedIncident.user_notes && selectedIncident.user_notes.length > 0 ? (
@@ -800,6 +814,7 @@ export default function Incidents() {
                                         <p className="text-sm text-gray-400 italic mb-4">No notes yet</p>
                                     )}
 
+                                    {/* add new note input */}
                                     <div className="flex gap-2">
                                         <input
                                             type="text"
@@ -828,7 +843,7 @@ export default function Incidents() {
                                     </div>
                                 </div>
 
-                                {/* Actions */}
+                                {/* resolve actions */}
                                 {selectedIncident.analysis_status !== 'resolved' && (
                                     <div className="pt-6 border-t-2 border-gray-100">
                                         <button
@@ -847,10 +862,12 @@ export default function Incidents() {
         );
     }
 
+    // list view output
     return (
         <div className="min-h-screen bg-linear-to-br from-purple-50 to-blue-50 p-8">
             <div className="max-w-7xl mx-auto space-y-8">
-                {/* Header */}
+
+                {/* page header */}
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-4xl font-black text-gray-800 mb-2">
@@ -867,10 +884,10 @@ export default function Incidents() {
                     </button>
                 </div>
 
-                {/* Search and Filters */}
+                {/* search and filter controls */}
                 <div className="space-y-4">
                     <div className="flex gap-4">
-                        {/* Search Bar */}
+                        {/* search bar input */}
                         <div className="flex-1 relative">
                             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                             <input
@@ -890,7 +907,7 @@ export default function Incidents() {
                             )}
                         </div>
 
-                        {/* Filter Toggle Button */}
+                        {/* filter toggle button */}
                         <button
                             onClick={() => setShowFilters(!showFilters)}
                             className={`px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all ${showFilters || activeFilterCount > 0
@@ -908,10 +925,11 @@ export default function Incidents() {
                         </button>
                     </div>
 
-                    {/* Expanded Filter Panel */}
+                    {/* expanded filter panel */}
                     {showFilters && (
                         <div className="bg-white p-6 rounded-2xl border-2 border-gray-100 space-y-6">
-                            {/* Severity Filters */}
+
+                            {/* severity buttons */}
                             <div>
                                 <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">Severity Level</h4>
                                 <div className="flex flex-wrap gap-2">
@@ -934,7 +952,7 @@ export default function Incidents() {
                                 </div>
                             </div>
 
-                            {/* Status Filters */}
+                            {/* status buttons */}
                             <div>
                                 <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">Status</h4>
                                 <div className="flex flex-wrap gap-2">
@@ -955,7 +973,7 @@ export default function Incidents() {
                                 </div>
                             </div>
 
-                            {/* Date Range Filter */}
+                            {/* date range inputs */}
                             <div>
                                 <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                                     <Calendar size={14} />
@@ -986,14 +1004,14 @@ export default function Incidents() {
                     )}
                 </div>
 
-                {/* Results Summary */}
+                {/* results summary text */}
                 <div className="flex items-center justify-between">
                     <p className="text-sm font-bold text-gray-500">
                         Showing <span className="text-purple-600 font-black">{filteredIncidents.length}</span> of <span className="font-black">{incidents.length}</span> incidents
                     </p>
                 </div>
 
-                {/* Table */}
+                {/* main table container */}
                 <div className="bg-white rounded-3xl shadow-sm border-2 border-gray-50 overflow-hidden">
                     {filteredIncidents.length === 0 ? (
                         <div className="p-12 text-center">
@@ -1024,10 +1042,10 @@ export default function Incidents() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y-2 divide-gray-50">
+                                {/* mapping through incidents to render rows */}
                                 {filteredIncidents.map((item) => {
                                     const riskScore = item.ai_insights?.[0]?.risk_score ?? 0;
                                     const severityLabel = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
-
 
                                     return (
                                         <tr key={item.id} className="hover:bg-gray-50/50 transition-all">

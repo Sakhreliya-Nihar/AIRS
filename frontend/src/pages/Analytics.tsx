@@ -9,9 +9,10 @@ import {
     Clock, ChevronDown
 } from "lucide-react";
 
+// Load API Key from Vite environment variables for secure API requests
 const API_KEY = import.meta.env.VITE_API_KEY;
 
-/* ---------- Types & Interfaces ---------- */
+// Types & Interfaces
 interface AIInsight {
     summary: string;
     mitigation_steps: string[];
@@ -21,19 +22,24 @@ interface AIInsight {
 interface Incident {
     id?: string;
     analysis_status: string;
-    timestamp?: any;
+    timestamp?: any; // Marked as 'any' because it could be a Firebase Timestamp object or a standard ISO string
     ai_insights?: AIInsight[] | null;
 }
 
+// Props for the individual statistic cards displayed at the top of the dashboard
 interface StatCardProps {
     label: string;
     value: number | string;
-    color?: string;
-    icon: React.ElementType;
-    trend?: string;
+    color?: string; // Optional Tailwind text color class
+    icon: React.ElementType; // Allows passing Lucide React components directly as props
+    trend?: string; // e.g., "+12% Resolution"
 }
 
-/* ---------- Configuration & Constants ---------- */
+/* ==========================================
+   Configuration & Constants
+   ========================================== */
+
+// Maps severity levels to specific hex colors used in the PieChart
 const SEVERITY_COLORS: Record<string, string> = {
     Critical: "#ef4444",
     High: "#f97316",
@@ -41,6 +47,8 @@ const SEVERITY_COLORS: Record<string, string> = {
     Low: "#22c55e"
 };
 
+// Definitions for the time filter dropdown. 
+// Uses nulls to determine which time unit to calculate against in the filter logic.
 const TIME_RANGES = [
     { label: 'Last Hour', value: 'hour', hours: 1, days: null },
     { label: 'Last 24 Hours', value: 'day', hours: 24, days: null },
@@ -51,7 +59,10 @@ const TIME_RANGES = [
     { label: 'Custom Range', value: 'custom', hours: null, days: null }
 ];
 
-/* ---------- Sub-Components ---------- */
+/**
+ * Reusable StatCard component for displaying key metrics.
+ * Dynamically adjusts its icon background color based on the provided text color.
+ */
 const StatCard: React.FC<StatCardProps> = ({ label, value, color, icon: Icon, trend }) => (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-start justify-between hover:shadow-md transition-all duration-300">
         <div>
@@ -64,32 +75,36 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, color, icon: Icon, tr
                 </div>
             )}
         </div>
+        {/* Dynamic Background Color Generation: If a color like 'text-red-600' is passed, it converts it to 'bg-red-100' for the icon background */}
         <div className={`p-3 rounded-xl ${color ? color.replace('text-', 'bg-').replace('600', '100').replace('500', '100') : "bg-indigo-50 text-indigo-600"} flex items-center justify-center`}>
             <Icon size={20} />
         </div>
     </div>
 );
 
-/* ---------- Main Component ---------- */
+// main component
 export default function Analytics() {
+    // Data & Loading State 
     const [incidents, setIncidents] = useState<Incident[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [isSyncing, setIsSyncing] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
+    // Time Filter State 
     const [selectedRange, setSelectedRange] = useState<string>('week');
     const [customStartDate, setCustomStartDate] = useState<string>('');
     const [customEndDate, setCustomEndDate] = useState<string>('');
     const [showCustomPicker, setShowCustomPicker] = useState<boolean>(false);
 
+    /**
+     * Fetches incident data from the local Python backend.
+     */
     const fetchData = async () => {
         setError(null);
         try {
             const res = await fetch("http://127.0.0.1:8000/api/incidents", {
-                headers: {
-                    "X-API-Key": API_KEY
-                }
+                headers: { "X-API-Key": API_KEY }
             });
 
             if (!res.ok) {
@@ -109,17 +124,28 @@ export default function Analytics() {
         }
     };
 
+    // Fetch data on initial component mount
     useEffect(() => {
         fetchData();
     }, []);
 
+    /**
+      * Data Filtering & Aggregation Hooks (useMemo)
+      * These recalculate only when 'incidents' or 'selectedRange' change, avoiding unnecessary re-renders.
+    */
+
+    /**
+     * Filters the raw incident list based on the currently selected time range.
+     */
     const filteredIncidents = useMemo(() => {
+        // Handle Custom Date Range
         if (selectedRange === 'custom' && customStartDate && customEndDate) {
             const start = new Date(customStartDate);
             const end = new Date(customEndDate);
-            end.setHours(23, 59, 59, 999);
+            end.setHours(23, 59, 59, 999); // Extend to the very end of the selected day
 
             return incidents.filter(inc => {
+                // Handle both Firebase Timestamp objects (which have a .seconds property) and standard date strings
                 const incDate = inc.timestamp?.seconds
                     ? new Date(inc.timestamp.seconds * 1000)
                     : new Date(inc.timestamp);
@@ -127,15 +153,16 @@ export default function Analytics() {
             });
         }
 
+        // Handle "All Time"
         if (selectedRange === 'all') {
             return incidents;
         }
 
+        // Handle Preset Ranges (Hour, Day, Week, etc.)
         const range = TIME_RANGES.find(r => r.value === selectedRange);
         if (!range) return incidents;
 
-        const cutoffDate = new Date();
-
+        const cutoffDate = new Date(); // Represents the oldest date 
         if (range.hours) {
             cutoffDate.setHours(cutoffDate.getHours() - range.hours);
         } else if (range.days) {
@@ -150,50 +177,56 @@ export default function Analytics() {
         });
     }, [incidents, selectedRange, customStartDate, customEndDate]);
 
+    /**
+     * Calculates the top-level numbers for the 4 StatCards.
+     */
     const stats = useMemo(() => {
         const total = filteredIncidents.length;
         const open = filteredIncidents.filter(i => i.analysis_status !== "resolved").length;
+        // Critical incidents are those with a score >= 8 that are NOT yet resolved
         const critical = filteredIncidents.filter(i =>
             (i.ai_insights?.[0]?.risk_score ?? 0) >= 8 && i.analysis_status !== "resolved"
         ).length;
         return { total, open, critical, resolved: total - open };
     }, [filteredIncidents]);
 
+    /**
+     * Formats data for the PieChart (Risk Breakdown).
+     * Maps AI risk scores (1-10) into string categories (Low, Medium, High, Critical).
+     */
     const severityData = useMemo(() => {
+        // Only count incidents that have been analyzed and have a score
         const analyzedIncidents = filteredIncidents.filter(i =>
             i.ai_insights && i.ai_insights.length > 0 && i.ai_insights[0].risk_score !== undefined
         );
 
         return [
+            { name: 'Critical', value: analyzedIncidents.filter(i => (i.ai_insights?.[0].risk_score ?? 0) >= 8).length },
             {
-                name: 'Critical',
-                value: analyzedIncidents.filter(i => (i.ai_insights?.[0].risk_score ?? 0) >= 8).length
-            },
-            {
-                name: 'High',
-                value: analyzedIncidents.filter(i => {
+                name: 'High', value: analyzedIncidents.filter(i => {
                     const s = i.ai_insights?.[0].risk_score ?? 0;
                     return s >= 6 && s < 8;
                 }).length
             },
             {
-                name: 'Medium',
-                value: analyzedIncidents.filter(i => {
+                name: 'Medium', value: analyzedIncidents.filter(i => {
                     const s = i.ai_insights?.[0].risk_score ?? 0;
                     return s >= 4 && s < 6;
                 }).length
             },
-            {
-                name: 'Low',
-                value: analyzedIncidents.filter(i => (i.ai_insights?.[0].risk_score ?? 0) < 4).length
-            },
-        ].filter(d => d.value > 0);
+            { name: 'Low', value: analyzedIncidents.filter(i => (i.ai_insights?.[0].risk_score ?? 0) < 4).length },
+        ].filter(d => d.value > 0); // Remove categories with 0 incidents to keep the pie chart clean
     }, [filteredIncidents]);
 
+    /**
+     * Complex data transformation for the AreaChart (Threat Activity Trend).
+     * It takes raw incident timestamps and groups them into "buckets" (minutes, hours, days, or months)
+     * depending on the selected time range. It ensures continuous data by filling empty buckets with 0.
+     */
     const trendData = useMemo(() => {
         if (!incidents.length) return [];
 
-        // Helper to safely parse dates from API payload
+        // Helper to safely parse dates from mixed API payload formats
         const parseDate = (ts: any) => {
             if (!ts) return new Date();
             if (ts.seconds) return new Date(ts.seconds * 1000);
@@ -205,51 +238,56 @@ export default function Analytics() {
         let end = new Date();
         let bucketFormat: 'minute' | 'hour' | 'day' | 'month' = 'day';
 
+        // 1. Determine Start Time and Bucket Size based on selected filter
         if (selectedRange === 'hour') {
             start.setHours(start.getHours() - 1);
-            bucketFormat = 'minute';
+            bucketFormat = 'minute'; // Group by 5-minute increments
         } else if (selectedRange === 'day') {
             start.setHours(start.getHours() - 24);
-            bucketFormat = 'hour';
+            bucketFormat = 'hour';   // Group by hour
         } else if (selectedRange === 'week') {
             start.setDate(start.getDate() - 7);
-            bucketFormat = 'day';
+            bucketFormat = 'day';    // Group by day
         } else if (selectedRange === 'month') {
             start.setDate(start.getDate() - 30);
             bucketFormat = 'day';
         } else if (selectedRange === 'year') {
             start.setFullYear(start.getFullYear() - 1);
-            bucketFormat = 'month';
-        } else if (selectedRange === 'all') {
-            const times = incidents.map(i => parseDate(i.timestamp).getTime());
-            start = new Date(Math.min(...times));
-            const daysDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
-            if (daysDiff <= 2) bucketFormat = 'hour';
-            else if (daysDiff <= 90) bucketFormat = 'day';
-            else bucketFormat = 'month';
-        } else if (selectedRange === 'custom') {
-            start = new Date(customStartDate || Date.now());
-            end = new Date(customEndDate || Date.now());
-            end.setHours(23, 59, 59, 999);
+            bucketFormat = 'month';  // Group by month
+        } else if (selectedRange === 'all' || selectedRange === 'custom') {
+            // For dynamic ranges, calculate the difference in days to pick the best bucket size
+            if (selectedRange === 'all') {
+                const times = incidents.map(i => parseDate(i.timestamp).getTime());
+                start = new Date(Math.min(...times));
+            } else {
+                start = new Date(customStartDate || Date.now());
+                end = new Date(customEndDate || Date.now());
+                end.setHours(23, 59, 59, 999);
+            }
+
             const daysDiff = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24);
             if (daysDiff <= 2) bucketFormat = 'hour';
             else if (daysDiff <= 90) bucketFormat = 'day';
             else bucketFormat = 'month';
         }
 
-        // Safety fallback for corrupted old dates (e.g. Unix epoch 1970)
+        // Safety fallback for corrupted old dates (e.g., Unix epoch 1970)
         if (start.getFullYear() < 2000) {
             start = new Date();
             start.setFullYear(start.getFullYear() - 1);
             bucketFormat = 'month';
         }
 
-        // Creates consistent map keys (e.g., "2024-03-01T14") to aggregate attacks securely
+        /**
+         * Generates a string key to group incidents into the Map.
+         * e.g., bucketFormat 'hour' returns "2024-03-01T14" grouping all incidents between 2:00 PM and 2:59 PM.
+         */
         const getBucketKey = (d: Date, format: string) => {
             const yr = d.getFullYear();
             const mo = String(d.getMonth() + 1).padStart(2, '0');
             const dy = String(d.getDate()).padStart(2, '0');
             const hr = String(d.getHours()).padStart(2, '0');
+            // For minute format, round down to the nearest 5 minutes
             const mi = String(Math.floor(d.getMinutes() / 5) * 5).padStart(2, '0');
 
             if (format === 'minute') return `${yr}-${mo}-${dy}T${hr}:${mi}`;
@@ -261,8 +299,9 @@ export default function Analytics() {
 
         const buckets = new Map<string, { label: string, attacks: number }>();
 
-        // Pre-fill the buckets to guarantee continuous lines (no gaps in the graph)
+        // 2. Pre-fill the buckets to guarantee continuous lines (no gaps in the graph where attacks = 0)
         let current = new Date(start);
+        // Align the starting bucket to the exact boundary of the chosen format
         if (bucketFormat === 'minute') current.setMinutes(Math.floor(current.getMinutes() / 5) * 5, 0, 0);
         else if (bucketFormat === 'hour') current.setMinutes(0, 0, 0);
         else if (bucketFormat === 'day') current.setHours(0, 0, 0, 0);
@@ -272,6 +311,7 @@ export default function Analytics() {
             const key = getBucketKey(current, bucketFormat);
             let label = '';
 
+            // Format the X-Axis label string for the chart based on the bucket size
             if (bucketFormat === 'minute' || bucketFormat === 'hour') {
                 label = current.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             } else if (bucketFormat === 'day') {
@@ -280,15 +320,16 @@ export default function Analytics() {
                 label = current.toLocaleDateString([], { month: 'short', year: '2-digit' });
             }
 
-            buckets.set(key, { label, attacks: 0 });
+            buckets.set(key, { label, attacks: 0 }); // Initialize with 0
 
+            // Increment the pointer for the while loop
             if (bucketFormat === 'minute') current.setMinutes(current.getMinutes() + 5);
             else if (bucketFormat === 'hour') current.setHours(current.getHours() + 1);
             else if (bucketFormat === 'day') current.setDate(current.getDate() + 1);
             else if (bucketFormat === 'month') current.setMonth(current.getMonth() + 1);
         }
 
-        // Tally the incidents into the buckets
+        // 3. Tally the actual incidents into the corresponding pre-filled buckets
         incidents.forEach(inc => {
             const d = parseDate(inc.timestamp);
             if (d >= start && d <= end) {
@@ -299,13 +340,14 @@ export default function Analytics() {
             }
         });
 
-        // Convert Map to an Array for Recharts
+        // 4. Convert the Map into the array structure required by Recharts
         return Array.from(buckets.values()).map(b => ({
             date: b.label,
             attacks: b.attacks
         }));
     }, [incidents, selectedRange, customStartDate, customEndDate]);
 
+    // Initial loading state UI
     if (loading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
@@ -317,6 +359,7 @@ export default function Analytics() {
 
     return (
         <div className="p-8 bg-[#F8FAFC] min-h-screen text-slate-900 font-sans flex flex-col">
+            {/* Header & Time Filters*/}
             <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                 <div>
                     <h2 className="text-3xl font-black tracking-tighter text-slate-900">Security Analytics</h2>
@@ -327,13 +370,14 @@ export default function Analytics() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
+                    {/* Main Time Range Dropdown */}
                     <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                         <Clock size={16} className="text-indigo-600" />
                         <select
                             value={selectedRange}
                             onChange={(e) => {
                                 setSelectedRange(e.target.value);
-                                setShowCustomPicker(e.target.value === 'custom');
+                                setShowCustomPicker(e.target.value === 'custom'); // Toggle secondary date inputs
                             }}
                             className="text-xs font-bold text-slate-700 bg-transparent border-none outline-none cursor-pointer"
                         >
@@ -344,6 +388,7 @@ export default function Analytics() {
                         <ChevronDown size={14} className="text-slate-400" />
                     </div>
 
+                    {/* Conditional Custom Date Picker Inputs */}
                     {showCustomPicker && (
                         <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
                             <input
@@ -364,6 +409,7 @@ export default function Analytics() {
                 </div>
             </header>
 
+            {/* Stat Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 <StatCard label="Total Events" value={stats.total} icon={Activity} />
                 <StatCard label="Critical Threats" value={stats.critical} color="text-red-600" icon={ShieldAlert} />
@@ -371,7 +417,10 @@ export default function Analytics() {
                 <StatCard label="Resolved" value={stats.resolved} color="text-green-600" icon={ShieldCheck} trend="+12% Resolution" />
             </div>
 
+            {/* Charts Grid  */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-8">
+
+                {/* Main Area Chart (Takes up 8 of 12 columns) */}
                 <div className="lg:col-span-8">
                     <div className="bg-white p-8 rounded-4xl shadow-sm border border-slate-100">
                         <h3 className="text-lg font-bold mb-8">Threat Activity Trend</h3>
@@ -379,6 +428,7 @@ export default function Analytics() {
                             <ResponsiveContainer>
                                 <AreaChart data={trendData}>
                                     <defs>
+                                        {/* Defines the smooth fade gradient under the area chart line */}
                                         <linearGradient id="colorAttacks" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15} />
                                             <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
@@ -391,6 +441,7 @@ export default function Analytics() {
                                         tickLine={false}
                                         tick={{ fontSize: 11, fontWeight: 700, fill: '#94a3b8' }}
                                         dy={10}
+                                        // Slants the labels for tighter views (like days), keeps them straight for years/all time
                                         angle={selectedRange === 'year' || selectedRange === 'all' ? 0 : -15}
                                         textAnchor={selectedRange === 'year' || selectedRange === 'all' ? 'middle' : 'end'}
                                         minTickGap={20}
@@ -404,6 +455,7 @@ export default function Analytics() {
                     </div>
                 </div>
 
+                {/* Side Pie Chart (Takes up 4 of 12 columns) */}
                 <div className="lg:col-span-4">
                     <div className="bg-white p-8 rounded-4xl shadow-sm border border-slate-100 h-full">
                         <h3 className="text-lg font-bold mb-2">Risk Breakdown</h3>
@@ -424,6 +476,7 @@ export default function Analytics() {
                 </div>
             </div>
 
+            {/* Footer / Connection Status Bar */}
             <footer className="mt-auto pt-4">
                 <div className={`bg-white rounded-3xl p-6 border-2 transition-all duration-500 flex flex-col md:flex-row items-center justify-between gap-4 ${error ? 'border-red-100 bg-red-50/30' : 'border-slate-50 shadow-sm'
                     }`}>
@@ -455,6 +508,7 @@ export default function Analytics() {
                             <span className="text-xs font-bold text-slate-600">http://127.0.0.1:8000/api/incidents</span>
                         </div>
 
+                        {/* Manual Refresh / Retry Button */}
                         <button
                             onClick={() => { setIsSyncing(true); fetchData(); }}
                             disabled={isSyncing}
