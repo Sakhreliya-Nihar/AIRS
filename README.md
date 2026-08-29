@@ -2,23 +2,34 @@
 
 ****Project Title****
 
-LLM-Powered Incident Response Assistant for SMEs
+A.I.R.S: AN AI-POWERED DASHBOARD TRANSLATING COMPLEX CYBER THREATS INTO CLEAR ACTION PLANS FOR SMALL AND MEDIUM ENTERPRISES (SMEs)
 
 ****Keywords****
 
-Artificial-Intelligence | SMEs | Threat Mitigation | Large Language Models | Risk-Management | Incident-Response | Mitigation | Cost-Efficiency | Security Awareness | Crisis Communication | LLMs | Small and medium-sized Businesses
+Cyber-Security | Small/Medium-Sized Enterprises | Incident-Response | Large Language Models | Risk-Management | Communication | Mitigation | Affordability | Cybersecurity-Awareness | Security Dashboard | Artificial-Intelligence | LLMs | SMEs | AI 
 
 ****Project Vision****
 
-Small and medium-sized enterprises (SMEs) are facing an increase in targeted cyberattacks but often lack the resources, expertise and awareness to respond to incidents effectively. The financial pressures brought on by the COVID-19 pandemic has forced many SMEs to prioritise the short-term business survival over the long-term cybersecurity investment. As a result, numerous SMEs are continuing to use outdated systems and are providing limited staff training, with many of them assuming that they are too small to be targeted – a misconception that has left them increasingly vulnerable.
+Small and medium-sized enterprises (SMEs) are facing an increase in targeted cyberattacks but often lack the resources, expertise and awareness to respond to incidents effectively. The financial pressures brought on by the COVID-19 pandemic has forced many SMEs to prioritise the short-term business survival over the long-term cybersecurity investment. As a result, numerous SMEs are continuing to use outdated systems and are providing limited staff training, with many of them assuming that they are too small to be targeted – a misconception that has left them highly vulnerable. 
 
-while some SMEs use open-source or commercial detection tools, they struggle to interpret technical alerts and act upon them in a timely manner. This leads to delayed responses, poor incident communication, and greater financial and reputational damage. According to a 2025 Hiscox report, 59% of SMEs experienced a cyber-attack in the last 12 months, highlighting the urgency for further cybersecurity support.    
+Furthermore, while some SMEs utilise open-source or commercial detection tools, they struggle to interpret the complex, technical alerts these systems generate. This "technical noise" leads to delayed responses, poor incident communication, and greater financial and reputational damage. According to a 2025 Hiscox report, 59% of SMEs experienced a cyber-attack in the last 12 months, highlighting the urgent need for accessible cybersecurity support.     
  
-This project aims to address these challenges by developing an affordable, LLM-powered incident response assistant designed specifically for SMEs. The system will interpret and communicate cybersecurity events clearly and effectively. By integrating existing open-source detection tools with a lightweight local Large Language Model (LLM), the system translates technical security alerts into simple, summarised descriptions with risk scores and recommended mitigation steps. It will also serve an educational role, raising cybersecurity awareness among SMEs, and helping to reduce future risks.  
+### The A.I.R.S. Solution  
 
-Unlike existing AI SOC products that are expensive and aimed at large enterprises, the goal for this assistant is to provide a low-cost, easy-to-use incident management dashboard that helps them understand what has happened, how serious it is, and what steps to take to mitigate the threat - without requiring deep technical knowledge. It will improve communication and awareness during and after incidents, helping SMEs to respond faster, make informed decisions, and overall strengthen their cyber resilience.  
+This project addresses these challenges through the development of A.I.R.S., an affordable, AI-driven incident response dashboard designed specifically for SMEs. A.I.R.S. bridges the cybersecurity expertise gap by integrating standard open-source detection tools with modern infrastructure, utilising Google Firestore and the Gemini 2.5 Flash API.
+
+To ensure strict data privacy and address the security concerns of cloud integration, the system employs a localised pre-processing pipeline. All raw network and system logs undergo local regex sanitisation to strip Personally Identifiable Information (PII) and are secured via AES-256 encryption before any data is transmitted to the LLM. 
+
+### Core Functionality and Impact
+
+Unlike expensive, enterprise-level AI Security Operations Center (SOC) products, A.I.R.S. provides a low-cost, intuitive React-based dashboard tailored for non-technical users. The system dynamically translates complex security alerts into plain-English summaries, calculates clear risk scores (1–10), and generates step-by-step mitigation playbooks. 
+
+Key features include dynamic AI personas that adjust the technical depth of the response based on the user's role, providing targeted LLM summaries complete with actionable mitigation steps. A.I.R.S. also features automated email notifications for new events, ensuring threats are addressed promptly. Ultimately, A.I.R.S. serves both an operational and educational role—helping SME owners understand what happened, how serious it is, and exactly how to fix it, thereby strengthening their overall cyber resilience.
 
 ****Supervisor****
 
 Ushoshee Mukherjee
+
+****Sources:****
+https://www.hiscoxgroup.com/news/press-releases/2025/29-09-25 
 

@@ -86,12 +86,12 @@ export default function NavBar({ brandName, imageSrcPath, navItems, onSelect, ac
         fetchActiveAlerts();
 
         // Poll the API every 30 seconds for new incidents
-        const interval = setInterval(fetchActiveAlerts, 30000);
+        //const interval = setInterval(fetchActiveAlerts, 30000);
 
         // Unsubscribe from Firestore and clear polling interval on component unmount
         return () => {
             unsubUser();
-            clearInterval(interval);
+            //clearInterval(interval);
         };
     }, []);
 

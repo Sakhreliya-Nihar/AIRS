@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Body
 from services.firestore import get_incidents, db
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import firebase_admin.firestore as firestore 
 from security.crypto import encrypt_payload
 
@@ -8,11 +8,11 @@ router = APIRouter(tags=["API Routes"]) # Initialize the router and group these 
 
 class NoteRequest(BaseModel):
     """Defines the expected JSON payload for adding a note to an incident."""
-    note: str
+    note: str = Field(..., max_length=1000)
 
 class AssignRequest(BaseModel):
     """Defines the expected JSON payload for assigning an incident to a user."""
-    assigned_to: str
+    assigned_to: str = Field(..., max_length=100)
 
 @router.get("/api/incidents") 
 # API Endpoints

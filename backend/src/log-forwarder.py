@@ -110,7 +110,7 @@ KNOWN_SAFE_PATTERNS = [
 ]
 
 # adding batching for brute force to reduce lines being parsed to llm at once
-BATCH_LIMIT = 20 # Number of suspicious lines to collect before calling LLM
+BATCH_LIMIT = 10 # Number of suspicious lines to collect before calling LLM
 MAX_WAIT_SECONDS = 90 # 1.5 minutes 
 last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
