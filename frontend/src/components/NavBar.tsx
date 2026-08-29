@@ -198,7 +198,7 @@ export default function NavBar({ brandName, imageSrcPath, navItems, onSelect, ac
                     </div>
                     <div className="flex flex-col">
                         <span className="text-lg font-black tracking-tight text-slate-900 leading-none">{brandName}</span>
-                        <span className="text-[10px] font-bold text-purple-600 tracking-widest uppercase mt-1">SOC Engine</span>
+                        <span className="text-[10px] font-bold text-purple-600 tracking-widest uppercase mt-1">AIRS</span>
                     </div>
                 </div>
 

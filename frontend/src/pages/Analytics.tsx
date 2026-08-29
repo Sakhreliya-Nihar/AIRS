@@ -522,7 +522,7 @@ export default function Analytics() {
                 </div>
 
                 <p className="text-center text-[10px] font-bold text-slate-300 mt-4 uppercase tracking-[0.2em]">
-                    Security Assistant Dashboard • Interface Built by Nihar Sakhreliya
+                    Security Incident Response Assistant Dashboard • Interface Built by Nihar Sakhreliya
                 </p>
             </footer>
         </div>
