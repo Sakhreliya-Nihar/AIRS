@@ -10,8 +10,8 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 EXPECTED_API_KEY = os.getenv("API_KEY") 
 
 async def get_api_key(api_key_header: str = Security(api_key_header)):
-    print(f"Received Key: {api_key_header}") 
-    print(f"Expected Key: {EXPECTED_API_KEY}")
+    # print(f"Received Key: {api_key_header}") 
+    # print(f"Expected Key: {EXPECTED_API_KEY}")
     if api_key_header == EXPECTED_API_KEY:
         return api_key_header
     else:

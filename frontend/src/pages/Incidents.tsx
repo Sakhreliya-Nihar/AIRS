@@ -33,10 +33,9 @@ interface Incident {
     id: string;
     event: IncidentEvent;
     ai_insights: AIInsight[] | null;
-    analysis_status: "completed" | "pending" | "ignored_low_risk" | "resolved";
+    analysis_status: "AI_Analysis_Complete" | "pending" | "resolved";
     timestamp?: any;
     user_notes?: string[];
-    is_verified?: boolean;
     completed_steps?: number[];
     assigned_to?: string;
 }
@@ -326,15 +325,13 @@ export default function Incidents() {
             const tableData = filteredIncidents.map(incident => {
                 const riskScore = incident.ai_insights?.[0]?.risk_score ?? 0;
                 const severity = riskScore >= 8 ? "CRITICAL" : riskScore >= 6 ? "HIGH" : riskScore >= 4 ? "MEDIUM" : riskScore > 0 ? "LOW" : "PENDING";
-                const integrity = incident.is_verified ? "VERIFIED" : "TAMPERED";
                 const timestamp = formatTimestamp(incident.timestamp);
                 const summary = incident.ai_insights?.[0]?.summary || 'N/A';
 
                 return [
                     incident.event.event_id.substring(0, 8),
                     severity,
-                    integrity,
-                    incident.analysis_status.toUpperCase(),
+                    incident.analysis_status.replace(/_/g, ' ').toUpperCase(),
                     timestamp,
                     summary.length > 50 ? summary.substring(0, 47) + '...' : summary
                 ];
@@ -342,7 +339,7 @@ export default function Incidents() {
 
             autoTable(doc, {
                 startY: yPos,
-                head: [['ID', 'Severity', 'Integrity', 'Status', 'Timestamp', 'Summary']],
+                head: [['ID', 'Severity', 'Status', 'Timestamp', 'Summary']],
                 body: tableData,
                 theme: 'grid',
                 headStyles: {
@@ -358,9 +355,8 @@ export default function Incidents() {
                 columnStyles: {
                     0: { cellWidth: 20 },
                     1: { cellWidth: 22 },
-                    2: { cellWidth: 22 },
-                    3: { cellWidth: 35 },
-                    4: { cellWidth: 'auto' }
+                    2: { cellWidth: 35 },
+                    3: { cellWidth: 'auto' }
                 },
                 alternateRowStyles: {
                     fillColor: [245, 245, 245]
@@ -584,7 +580,7 @@ export default function Incidents() {
         switch (status) {
             case "resolved":
                 return "bg-green-100 border-green-300 text-green-700";
-            case "completed":
+            case "AI_Analysis_Complete":
                 return "bg-blue-100 border-blue-300 text-blue-700";
             case "pending":
                 return "bg-yellow-100 border-yellow-300 text-yellow-700";
@@ -626,21 +622,6 @@ export default function Incidents() {
 
                     {/* investigation panel */}
                     <div className="bg-white rounded-3xl shadow-xl border-2 border-gray-100 p-8 space-y-8">
-                        <div className={`p-4 rounded-2xl border-2 flex items-center gap-3 ${selectedIncident.is_verified
-                            ? "bg-green-50 border-green-100 text-green-700"
-                            : "bg-red-50 border-red-100 text-red-700"
-                            }`}>
-                            {selectedIncident.is_verified ? (
-                                <Shield size={20} />
-                            ) : (
-                                <AlertTriangle size={20} className="animate-pulse" />
-                            )}
-                            <span className="text-xs font-black uppercase tracking-widest">
-                                {selectedIncident.is_verified
-                                    ? "Integrity Verified: Data is cryptographically authentic"
-                                    : "Security Alert: Log integrity check failed - Potential tampering detected"}
-                            </span>
-                        </div>
 
                         {/* incident detail header */}
                         <div className="flex items-start justify-between">
@@ -657,7 +638,7 @@ export default function Incidents() {
                                     {severityLabel.toUpperCase()}
                                 </span>
                                 <span className={`px-4 py-2 rounded-xl text-xs font-black border-2 uppercase ${getStatusStyles(selectedIncident.analysis_status)}`}>
-                                    {selectedIncident.analysis_status}
+                                    {selectedIncident.analysis_status.replace(/_/g, ' ')}
                                 </span>
                             </div>
                         </div>
@@ -685,6 +666,18 @@ export default function Incidents() {
                         {viewMode === "mitigation" ? (
                             /* mitigation view */
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+
+                                {/* AI Liability Disclaimer */}
+                                <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 flex gap-3 items-start mb-6">
+                                    <AlertTriangle className="text-amber-600 shrink-0" size={20} />
+                                    <div>
+                                        <h4 className="text-sm font-black text-amber-900">Automated Playbook Advisory</h4>
+                                        <p className="text-xs text-amber-800 mt-1">
+                                            These mitigation steps are generated by an AI model. Implementing changes to firewall configurations or access controls without verification may cause network disruption. Please consult with IT personnel before making critical infrastructure changes.
+                                        </p>
+                                    </div>
+                                </div>
+
                                 <div className="bg-indigo-50 p-6 rounded-2xl border-2 border-indigo-100 mb-6">
                                     <h3 className="text-lg font-black text-indigo-900 mb-2 flex items-center gap-2">
                                         <ShieldCheck className="text-indigo-600" />
@@ -736,6 +729,18 @@ export default function Incidents() {
                                 {/* ai analysis section */}
                                 {selectedIncident.ai_insights && selectedIncident.ai_insights[0] && (
                                     <div className="space-y-6">
+
+                                        {/* AI Advisory Disclaimer */}
+                                        <div className="bg-amber-50 border-2 border-amber-200 rounded-xl p-4 flex gap-3 items-start">
+                                            <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={20} />
+                                            <div>
+                                                <h4 className="text-sm font-black text-amber-900">AI Analysis Advisory</h4>
+                                                <p className="text-xs text-amber-800 mt-1">
+                                                    Threat intelligence and summaries are AI-generated for advisory purposes only. Always independently verify incident context before acting. The system assumes no liability for network impact resulting from this automated guidance.
+                                                </p>
+                                            </div>
+                                        </div>
+
                                         {/* risk score visualizer */}
                                         <div>
                                             <h3 className="text-sm font-black text-gray-400 uppercase tracking-wider mb-3">Risk Score</h3>
@@ -956,18 +961,18 @@ export default function Incidents() {
                             <div>
                                 <h4 className="text-xs font-black text-gray-400 uppercase tracking-wider mb-3">Status</h4>
                                 <div className="flex flex-wrap gap-2">
-                                    {['completed', 'pending', 'resolved', 'ignored_low_risk'].map((status) => (
+                                    {['AI_Analysis_Complete', 'pending', 'resolved'].map((status) => (
                                         <button
                                             key={status}
                                             onClick={() => toggleStatusFilter(status)}
                                             className={`px-4 py-2 rounded-lg text-xs font-bold border-2 transition-all uppercase ${statusFilter.includes(status)
                                                 ? status === 'resolved' ? 'bg-green-100 border-green-300 text-green-700'
-                                                    : status === 'completed' ? 'bg-blue-100 border-blue-300 text-blue-700'
+                                                    : status === 'AI_Analysis_Complete' ? 'bg-blue-100 border-blue-300 text-blue-700'
                                                         : 'bg-gray-100 border-gray-300 text-gray-700'
                                                 : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-gray-300'
                                                 }`}
                                         >
-                                            {status.replace('_', ' ')}
+                                            {status.replace(/_/g, ' ')}
                                         </button>
                                     ))}
                                 </div>
@@ -1033,7 +1038,6 @@ export default function Incidents() {
                                 <tr className="bg-gray-100/50 border-b-2 border-gray-50">
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">ID</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Severity</th>
-                                    <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Integrity</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Assignee</th>
                                     <th className="p-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Time</th>
@@ -1056,21 +1060,8 @@ export default function Incidents() {
                                                 </span>
                                             </td>
                                             <td className="p-5">
-                                                {item.is_verified ? (
-                                                    <div className="flex items-center gap-2 text-green-600">
-                                                        <Shield size={16} />
-                                                        <span className="text-[10px] font-black uppercase">Verified</span>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex items-center gap-2 text-red-500 animate-pulse">
-                                                        <AlertTriangle size={16} />
-                                                        <span className="text-[10px] font-black uppercase">Tampered</span>
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td className="p-5">
                                                 <span className={`px-3 py-1 rounded-lg text-[9px] font-black border-2 uppercase ${getStatusStyles(item.analysis_status)}`}>
-                                                    {item.analysis_status}
+                                                    {item.analysis_status.replace(/_/g, ' ')}
                                                 </span>
                                             </td>
                                             <td className="p-5 text-[11px] font-bold text-gray-600">

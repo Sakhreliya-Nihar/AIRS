@@ -29,9 +29,9 @@ async def audit_logging_middleware(request: Request, call_next):
     # Process the request first
     response = await call_next(request)
 
-    # prevented 403 Forbidden or 404 Not Found errors to Firestore
-    # This prevents unauthenticated attackers from spamming db and draining quota.
-    if response.status_code in [403, 404]:
+    # Ignore 403/404 errors, React 'OPTIONS' checks, and standard 'GET' requests.
+    # only want to log mutations: POST, PATCH, DELETE.
+    if response.status_code in [403, 404] or request.method in ["OPTIONS", "GET"]:
         return response
     
     process_time = time.time() - start_time
@@ -43,12 +43,13 @@ async def audit_logging_middleware(request: Request, call_next):
             "method": request.method,
             "path": request.url.path,
             "client_ip": request.client.host,
-            "timestamp": firestore.firestore.SERVER_TIMESTAMP,
+            "timestamp": firestore.SERVER_TIMESTAMP, # Fixed the double .firestore typo here!
             "status_code": response.status_code,
             "process_time": process_time,
             "user_agent": request.headers.get("user-agent")
         }
         db.collection("audit_logs").add(log_data)
+        print(f"[AUDIT] Action '{request.method}' securely logged to database.")
     except Exception as e:
         print(f"Failed to write audit log: {e}")
 

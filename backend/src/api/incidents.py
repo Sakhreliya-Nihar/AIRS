@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Body
-from services.firestore import get_incidents, db
+from services.firestore import get_incidents, get_users, db 
 from pydantic import BaseModel, Field
 import firebase_admin.firestore as firestore 
 from security.crypto import encrypt_payload
@@ -17,7 +17,7 @@ class AssignRequest(BaseModel):
 @router.get("/api/incidents") 
 # API Endpoints
 
-@router.get("/api/incidents") # retreieves all incidients
+@router.get("/api/incidents") # retrieves all incidents
 def fetch_incidents():
     return get_incidents() 
 
@@ -71,15 +71,9 @@ def assign_incident(doc_id: str, request: AssignRequest):
 
 @router.get("/api/users") # Retrieves all users
 def fetch_users():
-    """Fetches all users for the frontend dropdown"""
+    """Fetches all users from the Python RAM cache (0 reads)"""
     try:
-        users_ref = db.collection("users").stream()
-        users_list = []
-        for doc in users_ref:
-            user_data = doc.to_dict()
-            user_data["id"] = doc.id 
-            users_list.append(user_data)
-        
-        return users_list
+        # no longer query Firebase here, just return the cache
+        return get_users()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
