@@ -1,22 +1,19 @@
 import os, datetime, sys, json, re, uuid, firebase_admin, time
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
-from google import genai
-from security.crypto import encrypt_payload
-from google.genai.types import GenerateContentConfig, SafetySetting, HarmCategory, HarmBlockThreshold
+# genai imports removed as they are now handled by llm_service.py
+from security.crypto import encrypt_payload, decrypt_payload # Added decrypt_payload for secure key retrieval
 from services.notifications import send_consolidated_email
+from services.llm_service import analyze_logs_with_llm # Import the new modular AI router
 
 current_dir = os.path.dirname(__file__) #fixing pathing issues between laptop and pc
 ENV_PATH = os.path.join(current_dir, ".env")
 load_dotenv(ENV_PATH)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# Create a single client object
-client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialise Firebase 
 cred = credentials.Certificate(os.path.join(current_dir, "serviceAccountKey.json"))
-firebase_admin.initialize_app(cred)
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 
@@ -139,18 +136,37 @@ def is_noise(line):
     line_lower = line.lower()
     return any(pattern in line_lower for pattern in KNOWN_SAFE_PATTERNS) # filters out unsuspicious logs
 
-def get_ai_persona():
-    """Fetches the technical level setting from Firestore and returns a specific system prompt."""
+def get_ai_config(assignee_id=None):
+    """Fetches personalized AI settings for the assignee. If unassigned, uses the primary admin."""
+    # Default fallback values
+    level = "business_owner"
+    provider = "gemini"
+    api_key = GEMINI_API_KEY
     try:
-        # Fetch the config document in the React Settings page
-        doc = db.collection("settings").document("global_config").get()
-        if doc.exists:
-            level = doc.to_dict().get("tech_level", "business_owner")
-        else:
-            level = "business_owner"
+        # Fetch the entire users collection to find preferences
+        users_ref = db.collection("users").stream()
+        all_users = {doc.id: doc.to_dict() for doc in users_ref}
+        
+        # Determine which user's settings to use
+        target_user = None
+        if assignee_id and assignee_id in all_users:
+            target_user = all_users[assignee_id]
+        elif all_users:
+            # Fallback to the first user found if unassigned
+            target_user = list(all_users.values())[0]
+
+        if target_user:
+            level = target_user.get("tech_level", "business_owner")
+            provider = target_user.get("llm_provider", "gemini")
+            
+            # DECRYPT the personal API key stored in the user document
+            encrypted_key = target_user.get("llm_api_key")
+            if encrypted_key:
+                decrypted_key = decrypt_payload(encrypted_key)
+                if decrypted_key:
+                    api_key = decrypted_key
     except Exception as e:
-        print(f"Warning: Could not fetch settings ({e}). Defaulting to Business Owner.")
-        level = "business_owner"
+        print(f"Warning: Could not fetch user settings ({e}). Using system defaults.")
 
     # Define the 3 distinct personalities for ai prompt targetting
     prompts = {
@@ -174,7 +190,7 @@ def get_ai_persona():
             "For the 'mitigation_steps': Provide exact, advanced remediation commands (e.g., specific iptables drops, patching CVEs) and long-term architectural recommendations."
         )
     }
-    return prompts.get(level, prompts["business_owner"])
+    return prompts.get(level, prompts["business_owner"]), provider, api_key
 
 def process_batch(batch_list):
     global last_batch_time
@@ -185,75 +201,21 @@ def process_batch(batch_list):
     # Group the cleaned logs from memory
     combined_text = "\n".join([f"ID {item['event_id']}: {item['raw_sanitised_text']}" for item in batch_list])
 
-    persona_instruction = get_ai_persona() 
+    # Grab individual user AI config for the batch
+    persona_instruction, llm_provider, llm_api_key = get_ai_config(batch_list[0].get("assigned_to")) 
     print(f"AI Persona Loaded: {persona_instruction[:50]}...") # Print first 50 chars to confirm
+    print(f"Routing batch to: {llm_provider.upper()}")
     try: 
         print("Waiting 60 seconds for API rate limits...")
         time.sleep(61)
-        response = client.models.generate_content(
-            model='gemini-2.5-flash-lite',
-             config=GenerateContentConfig(
-                safety_settings=[
-                    SafetySetting(
-                        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                        threshold=HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    SafetySetting(
-                        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                        threshold=HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    SafetySetting(
-                        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
-                        threshold=HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                    SafetySetting(
-                        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                        threshold=HarmBlockThreshold.BLOCK_NONE,
-                    ),
-                ],
-                response_mime_type="application/json"
-            ),
-            contents=f"""
-
-
-            {persona_instruction}
-
-            LOGS:
-            {combined_text}
-            
-            You must strictly return ONLY a JSON list of objects matching the exact structure below. 
-            Do not include markdown formatting like ```json outside of the actual JSON output.
-
-            [
-                  {{ 
-                    "event_id": "the_original_id",
-                    "analysis": {{
-                        "incident_overview": "A thorough, detailed explanation of exactly what happened.",
-                        "business_impact": "The real-world consequence of this event (e.g., downtime, data breach, none).",
-                        "technical_root_cause": "The specific technical mechanism, vulnerability, or error that triggered this."
-                    }},
-                    "mitigation_plan": [
-                        {{
-                            "step_number": 1,
-                            "action_title": "A clear, concise title for this step.",
-                            "who_should_execute": "Specify who should do this (e.g., 'Business Owner', 'External IT Provider', 'Network Engineer').",
-                            "detailed_instructions": "Exact, step-by-step instructions. For IT/SOC, include specific CLI commands. For Business Owners, include exactly what to tell their IT team.",
-                            "why_this_is_necessary": "A deep explanation of what this specific action achieves and the risk of NOT doing it."
-                        }}
-                    ],
-                    "risk_assessment": {{
-                        "score": <integer between 1 and 10>,
-                        "severity": "<Critical, High, Medium, or Low>",
-                        "justification": "A detailed reason why this specific score and severity were assigned based on the log evidence."
-                    }}
-                }}
-            ] 
-            """
+        # Call the modular LLM service using the personalized settings
+        ai_results = analyze_logs_with_llm(
+            provider=llm_provider,
+            api_key=llm_api_key,
+            persona_instruction=persona_instruction,
+            combined_text=combined_text
         )
 
-        # print (response)    
-        raw_text = response.text.replace("```json", "").replace("```", "").strip()
-        ai_results = json.loads(raw_text)
 
         # Map results by event_id for easy lookup
         results_map = {res['event_id']: res for res in ai_results}
@@ -545,14 +507,14 @@ while True: # The script now runs continuously
                             log_sanitiser(new_lines, file) # Process ONLY the new lines
                             new_data_found = True
                         
-                        # Update "bookmark"
+                        # Update \"bookmark\"
                         file_progress[file] = f.tell() 
                         save_file_progress(file_progress)
 
                 except Exception as e:
                     print(f"Error reading {file}: {e}")
 
-        # Batch Timeout Logic
+        # Batch Timeout Logicstart
         time_since_last_batch = time.time() - last_batch_time
         
         if len(suspicious_buffer) > 0 and time_since_last_batch >= MAX_WAIT_SECONDS:

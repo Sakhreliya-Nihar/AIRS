@@ -76,4 +76,42 @@ def fetch_users():
         # no longer query Firebase here, just return the cache
         return get_users()
     except Exception as e:
+       raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/api/settings")
+def fetch_settings():
+    """Fetches the global configuration settings"""
+    try:
+        doc = db.collection("settings").document("global_config").get()
+        return doc.to_dict() if doc.exists else {}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.patch("/api/settings")
+def update_settings(payload: dict = Body(...)):
+    """Updates the global config (e.g., changing AI provider or API Key)"""
+    try:
+        # merge=True ensures I don't accidentally delete other settings
+        db.collection("settings").document("global_config").set(payload, merge=True)
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.patch("/api/users/{uid}/ai-settings")
+def update_user_ai_settings(uid: str, payload: dict = Body(...)):
+    """Encrypts the AI API key and saves settings to the individual user's document."""
+    try:
+        provider = payload.get("llm_provider")
+        raw_key = payload.get("llm_api_key")
+        
+        update_data = {"llm_provider": provider}
+        
+        # Only encrypt and update the key if a new one was provided
+        if raw_key:
+            update_data["llm_api_key"] = encrypt_payload(raw_key)
+            
+        db.collection("users").document(uid).update(update_data)
+        return {"status": "success"}
+    except Exception as e:
+        print(f"Failed to update user AI settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to secure AI settings")
