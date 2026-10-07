@@ -64,7 +64,7 @@ def assign_incident(doc_id: str, request: AssignRequest):
 
 @router.get("/api/users") # Retrieves all users
 def fetch_users():
-    """Fetches all users from the Python RAM cache (0 reads)"""
+    """Fetches all users from the Python RAM cache"""
     try:
         # no longer query Firebase here, just return the cache
         return get_users()

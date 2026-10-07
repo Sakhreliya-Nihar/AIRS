@@ -72,7 +72,7 @@ def on_users_snapshot(col_snapshot, changes, read_time):
 
 
 # START THE BACKGROUND LISTENERS
-print("Starting Firestore Real-Time Listeners (0-Read Mode Active)...")
+print("Starting Firestore Real-Time Listeners ...")
 # 1. Watch Incidents
 incident_query = db.collection("incidents").order_by("timestamp", direction=firestore.Query.DESCENDING)
 incident_watch = incident_query.on_snapshot(on_incident_snapshot)
