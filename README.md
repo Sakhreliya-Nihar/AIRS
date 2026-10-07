@@ -24,9 +24,33 @@ Unlike expensive, enterprise-level AI Security Operations Centre (SOC) products,
 
 Key features include dynamic AI personas that adjust the technical depth of the response based on the user's role, providing targeted LLM summaries complete with actionable mitigation steps. A.I.R.S. also features automated email notifications for new events, ensuring threats are addressed promptly. Ultimately, A.I.R.S. serves both an operational and educational role—helping SME owners understand what happened, how serious it is, and exactly how to fix it, thereby strengthening their overall organisational cyber resilience.
 
-****Supervisor****
+## Application Setup
 
-Ushoshee Mukherjee
+To run this application locally, you will need to start both the backend and frontend development servers.
+
+### Backend Setup
+
+Open your terminal and navigate to the backend source directory:
+`cd backend/src`
+Start the FastAPI server using Uvicorn:
+`uvicorn main:app --reload`
+
+### Frontend Setup
+Open a new, separate terminal window and navigate to the frontend source directory:
+`cd frontend`
+Start the React development server:
+`npm run dev`
+
+### Security Tools Setup (Snort & Winlogbeat)
+This project relies on Snort for network intrusion detection and Winlogbeat for shipping Windows event logs. Because the configuration for these tools depends on your specific environment, the detailed setup instructions have been separated into dedicated guides.
+
+To set up and configure these tools, please refer to the detailed documentation located in the setup guides directory:
+`Documentation/setup-guides`
+
+### Repository Structure
+* frontend/: Contains the React dashboard application.  
+* backend/: Contains the Python and FastAPI backend, handling log parsing, PII sanitisation, and AI logic.  
+* Documentation/: Contains the project documents and setup guides.  
 
 ****Sources:****
 https://www.hiscoxgroup.com/news/press-releases/2025/29-09-25 
