@@ -1,30 +1,30 @@
 import os, datetime, sys, json, re, uuid, firebase_admin, time
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
-# genai imports removed as they are now handled by llm_service.py
-from security.crypto import encrypt_payload, decrypt_payload # Added decrypt_payload for secure key retrieval
+from google import genai
+from security.crypto import encrypt_payload 
+from google.genai.types import GenerateContentConfig, SafetySetting, HarmCategory, HarmBlockThreshold
 from services.notifications import send_consolidated_email
-from services.llm_service import analyze_logs_with_llm # Import the new modular AI router
 
-current_dir = os.path.dirname(__file__) #fixing pathing issues between laptop and pc
+current_dir = os.path.dirname(__file__)#fixing pathing issues between laptop and pc
 ENV_PATH = os.path.join(current_dir, ".env")
 load_dotenv(ENV_PATH)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Create a single client object
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Initialise Firebase 
+
 cred = credentials.Certificate(os.path.join(current_dir, "serviceAccountKey.json"))
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
+firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+local_time = datetime.datetime.now().isoformat() # timestamp for cleaned logs
 
-
-local_time = datetime.datetime.now().isoformat() # timestamp for clean logs
-
-# Directories for raw and clean logs
+# Directories for raw and cleaned logs
 src_dir = os.path.join(current_dir, "..", "raw-logs")
-dst_dir = os.path.join(current_dir, "..", "clean-logs") 
-
-
+dst_dir = os.path.join(current_dir, "..", "cleaned-logs") 
 
 # Config for sanitisation 
 acc_ext = [".log", ".txt", ".ids", ".fast", ".ndjson"] # accepted file extensions
@@ -83,7 +83,7 @@ class ThreatDictionary:
 SUSPICIOUS_KEYWORDS = ThreatDictionary.get_all()
 
 # list of patterns that are noisy but safe
-# Expanded to aggressively filter out normal Windows and Linux background noise   
+# Expanded to aggressively filter out normal Windows and Linux background noise
 KNOWN_SAFE_PATTERNS = [
     # Linux / Unix Noise
     "session opened", "session closed", "systemd: started", "ntpdate", 
@@ -107,13 +107,14 @@ KNOWN_SAFE_PATTERNS = [
 ]
 
 # adding batching for brute force to reduce lines being parsed to llm at once
-BATCH_LIMIT = 10 # Number of suspicious lines to collect before calling LLM
-MAX_WAIT_SECONDS = 90 # 1.5 minutes 
+BATCH_LIMIT = 50 # Number of suspicious lines to collect before calling LLM
+MAX_WAIT_SECONDS = 90 # 1 1/2 mins 
 last_batch_time = time.time() # Initialise the timer
 suspicious_buffer = [] # Temporary list to hold lines
 processed_files_announced = set() # stop the terminal spam for processed logs check
 
 TRACKING_FILE = os.path.join(current_dir, "log_progress.json") # file tracking path
+
 def get_file_progress():
     """Loads the last known read position for files."""
     if os.path.exists(TRACKING_FILE):
@@ -123,10 +124,12 @@ def get_file_progress():
         except:
             return {}
     return {}
+
 def save_file_progress(progress_data):
     """Saves the current read position."""
     with open(TRACKING_FILE, 'w') as f:
         json.dump(progress_data, f)
+
 def is_suspicious(line):
     line_lower = line.lower()
     # If any suspicious word is in the line, the LLM will look at it
@@ -136,37 +139,18 @@ def is_noise(line):
     line_lower = line.lower()
     return any(pattern in line_lower for pattern in KNOWN_SAFE_PATTERNS) # filters out unsuspicious logs
 
-def get_ai_config(assignee_id=None):
-    """Fetches personalized AI settings for the assignee. If unassigned, uses the primary admin."""
-    # Default fallback values
-    level = "business_owner"
-    provider = "gemini"
-    api_key = GEMINI_API_KEY
+def get_ai_persona():
+    """Fetches the technical level setting from Firestore and returns a specific system prompt."""
     try:
-        # Fetch the entire users collection to find preferences
-        users_ref = db.collection("users").stream()
-        all_users = {doc.id: doc.to_dict() for doc in users_ref}
-        
-        # Determine which user's settings to use
-        target_user = None
-        if assignee_id and assignee_id in all_users:
-            target_user = all_users[assignee_id]
-        elif all_users:
-            # Fallback to the first user found if unassigned
-            target_user = list(all_users.values())[0]
-
-        if target_user:
-            level = target_user.get("tech_level", "business_owner")
-            provider = target_user.get("llm_provider", "gemini")
-            
-            # DECRYPT the personal API key stored in the user document
-            encrypted_key = target_user.get("llm_api_key")
-            if encrypted_key:
-                decrypted_key = decrypt_payload(encrypted_key)
-                if decrypted_key:
-                    api_key = decrypted_key
+        # Fetch the config document in the React Settings page
+        doc = db.collection("settings").document("global_config").get()
+        if doc.exists:
+            level = doc.to_dict().get("tech_level", "business_owner")
+        else:
+            level = "business_owner"
     except Exception as e:
-        print(f"Warning: Could not fetch user settings ({e}). Using system defaults.")
+        print(f"Warning: Could not fetch settings ({e}). Defaulting to Business Owner.")
+        level = "business_owner"
 
     # Define the 3 distinct personalities for ai prompt targetting
     prompts = {
@@ -175,7 +159,8 @@ def get_ai_config(assignee_id=None):
             "Your goal is to provide absolute clarity without technical jargon. "
             "For the 'summary': Explain exactly what happened, if it is dangerous, and what the direct business impact is. "
             "For the 'mitigation_steps': Provide actionable, plain-English steps. You MUST explain exactly *what* each step does and *why* it is necessary. "
-            "If a step requires IT help, tell them exactly what to ask their IT provider to do (e.g., 'Ask your IT team to block the attacker's IP address. This stops the hacker from attempting further logins.')."
+            "If a step requires IT help, tell them exactly what to ask their IT provider to do (e.g., 'Ask your IT team to block the attacker's IP address. This stops the hacker from attempting further logins.'). "
+            "Note: Not all busienssses will have an IT team, so ensure that they will be able to understand and mitiagte the threats to the best of their ability on their own."
         ),
         "it_support": (
             "Analyze these logs for a Junior IT Sysadmin. "
@@ -190,7 +175,8 @@ def get_ai_config(assignee_id=None):
             "For the 'mitigation_steps': Provide exact, advanced remediation commands (e.g., specific iptables drops, patching CVEs) and long-term architectural recommendations."
         )
     }
-    return prompts.get(level, prompts["business_owner"]), provider, api_key
+    
+    return prompts.get(level, prompts["business_owner"])
 
 def process_batch(batch_list):
     global last_batch_time
@@ -201,33 +187,93 @@ def process_batch(batch_list):
     # Group the cleaned logs from memory
     combined_text = "\n".join([f"ID {item['event_id']}: {item['raw_sanitised_text']}" for item in batch_list])
 
-    # Grab individual user AI config for the batch
-    persona_instruction, llm_provider, llm_api_key = get_ai_config(batch_list[0].get("assigned_to")) 
+    persona_instruction = get_ai_persona() 
     print(f"AI Persona Loaded: {persona_instruction[:50]}...") # Print first 50 chars to confirm
-    print(f"Routing batch to: {llm_provider.upper()}")
+
     try: 
+
         print("Waiting 60 seconds for API rate limits...")
         time.sleep(61)
-        # Call the modular LLM service using the personalized settings
-        ai_results = analyze_logs_with_llm(
-            provider=llm_provider,
-            api_key=llm_api_key,
-            persona_instruction=persona_instruction,
-            combined_text=combined_text
+
+        response = client.models.generate_content(
+            model='gemini-2.5-flash-lite',
+            config=GenerateContentConfig(
+                safety_settings=[
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                    SafetySetting(
+                        category=HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=HarmBlockThreshold.BLOCK_NONE,
+                    ),
+                ],
+                response_mime_type="application/json"
+            ),
+            contents=f"""
+            
+
+            {persona_instruction}
+
+            LOGS:
+            {combined_text}
+            
+            You will receive a batch containing multiple security logs. You MUST analyze EVERY SINGLE LOG ENTRY provided. 
+            For every individual log in the batch, you must generate a corresponding analysis object. If you receive 10 logs, you MUST return a JSON list containing exactly 10 objects. Do not group them together; maintain a strict 1-to-1 ratio.
+
+            You must strictly return ONLY a JSON list of objects matching the exact structure below. 
+            Do not include markdown formatting like ```json outside of the actual JSON output.
+
+            CRITICAL JSON RULE: You must properly escape all backslashes (\) in your output. 
+            For example, Windows file paths or regex patterns must be written with double backslashes like "C:\\Windows\\System32", NEVER as "C:\Windows\System32". 
+            Do not use raw tabs, newlines, or unescaped quotes inside the JSON string values.
+
+            [
+                {{ 
+                    "event_id": "the_original_id",
+                    "analysis": {{
+                        "incident_overview": "A thorough, detailed explanation of exactly what happened.",
+                        "business_impact": "The real-world consequence of this event (e.g., downtime, data breach, none).",
+                        "technical_root_cause": "The specific technical mechanism, vulnerability, or error that triggered this."
+                    }},
+                    "mitigation_plan": [
+                        {{
+                            "step_number": 1,
+                            "action_title": "A clear, concise title for this step.",
+                            "who_should_execute": "Specify who should do this (e.g., 'Business Owner', 'External IT Provider', 'Network Engineer').",
+                            "detailed_instructions": "Exact, step-by-step instructions. For IT/SOC, include specific CLI commands. For Business Owners, include exactly what to tell their IT team.",
+                            "why_this_is_necessary": "A deep explanation of what this specific action achieves and the risk of NOT doing it."
+                        }}
+                    ],
+                    "risk_assessment": {{
+                        "score": <integer between 1 and 10>,
+                        "severity": "<Critical, High, Medium, or Low>",
+                        "justification": "A detailed reason why this specific score and severity were assigned based on the log evidence."
+                    }}
+                }}
+            ]
+            """
         )
 
+        # print (response)    
+        raw_text = response.text.replace("```json", "").replace("```", "").strip()
+        ai_results = json.loads(raw_text)
 
         # Map results by event_id for easy lookup
         results_map = {res['event_id']: res for res in ai_results}
-
 
         # Fetch users once per batch to save resources
         users = list(db.collection("users").stream())
 
         user_notification_batches = {}
-
-
-
 
         # Update Firestore individually for each item in the batch
         for item in batch_list:
@@ -248,18 +294,20 @@ def process_batch(batch_list):
                 # Provide a fallback if the LLM hallucinated an empty list
                 if not formatted_steps:
                     formatted_steps = ["Review logs manually"]
+                    
                 # Encrypt the INDIVIDUAL insight
                 encrypted_insights = encrypt_payload({
                     "summary": summary,
                     "mitigation_steps": formatted_steps, 
                     "risk_score": risk
                 })
+
                 db.collection("incidents").document(doc_id).update({
                     "ai_insights": [encrypted_insights], # Save as a list for frontend
                     "risk_score": risk, # Store plain for analytics
                     "analysis_status": "AI_Analysis_Complete"
                 })
-        
+
                # Trigger Notifications for this specific incident
                 for user_doc in users:
                     user_data = user_doc.to_dict()
@@ -299,24 +347,26 @@ def process_batch(batch_list):
             print("MODEL NOT FOUND.")
         else:
             print(f"LLM Error: {e}")
+
     # Timer Reset whenever a batch is processed
     last_batch_time = time.time()
-    print("Batch processed and timer reset.")        
+    print("Batch processed and timer reset.")
 
 def log_sanitiser(new_lines, file_name_only):
-    processed_events = [] # list to hold processed events
+    processed_events = []
     global suspicious_buffer
+    
     print(f"Processing {len(new_lines)} new lines from {file_name_only}...")
 
-
     for line in new_lines: #extract each line of the log file individually
+
         try:
             # Parse the line as JSON (for Winlogbeat .ndjson files)
             log_data = json.loads(line)
 
             # Extract Winlogbeat Event ID (if it exists)
             event_id_val = str(log_data.get("winlog", {}).get("event_id", ""))
-
+            
             # Extract the human-readable message 
             # If 'message' isn't there, dump the 'winlog' object to a string
             raw_message = log_data.get("message", "")
@@ -333,6 +383,7 @@ def log_sanitiser(new_lines, file_name_only):
         except json.JSONDecodeError:
             # If it fails (because it's an old plain text or .ids or .log file), just use the line directly
             text_to_analyze = line
+
         if not line.strip(): continue # skips any lines that are empty
         if "CRON" in text_to_analyze and "CMD" in text_to_analyze: continue # Bins the pointless background traffic to save llm credits
         if is_noise(text_to_analyze): continue # Ignore 
@@ -346,7 +397,7 @@ def log_sanitiser(new_lines, file_name_only):
         sanitised_line = re.sub(pattern_mac, "[MAC_REDACTED]", text_to_analyze) # repalce all mac oocurances with redacted text
         # New System-Level Sanitisation
         sanitised_line = re.sub(pattern_email, "[EMAIL_REDACTED]", sanitised_line)
-        # sanitised_line = re.sub(pattern_win_user_path, "[WINDOWS_USER_DIR]", sanitised_line)
+        sanitised_line = re.sub(pattern_win_user_path, "[WINDOWS_USER_DIR]", sanitised_line)
         sanitised_line = re.sub(pattern_passwords, "[PASSWORD_REDACTED]", sanitised_line)
 
         # Extract both IPv4 and IPv6 addresses
@@ -386,6 +437,8 @@ def log_sanitiser(new_lines, file_name_only):
             "is_suspicious": suspicious_flag # flags any suspicious threats that may be worth parsing to llm
         }
 
+
+
         # batching logic
         if event["is_suspicious"]:
 
@@ -401,14 +454,15 @@ def log_sanitiser(new_lines, file_name_only):
 
             # Push to Firestore
             doc_ref = db.collection("incidents").add(encrypted_payload) 
+            
             # Add doc ID for later LLM updates
             actual_doc_id = doc_ref[1].id
             event['doc_id'] = actual_doc_id # The Firestore UUID (e.g., "zX9yP...")
             
             # Add to the buffer for batching
             suspicious_buffer.append(event)
-        
- # Trigger batch if limit reached
+
+            # Trigger batch if limit reached
             if len(suspicious_buffer) >= BATCH_LIMIT:
                 process_batch(suspicious_buffer) # send to LLM 
                 suspicious_buffer = [] # clear the buffer back to empty
@@ -434,7 +488,7 @@ def log_sanitiser(new_lines, file_name_only):
     
     with open(dst_path, "w") as f:
         json.dump(existing_data, f, indent=4, default=str)
-
+        
     print(f"Success: Sanitised {len(processed_events)} lines from {file_name_only}.")
     return processed_events
 
@@ -444,21 +498,20 @@ def log_watcher():
 
     # Load where file reading was left off last time
     file_progress = get_file_progress()
+
     if not os.path.exists(src_dir) or not os.path.exists(dst_dir): # more efficient way to check the dirs exist using .exists instead
         sys.exit("Error: Directories missing.")
             
-
     print(f"Monitoring {src_dir} for changes...")
 
-while True: # The script now runs continuously
+    while True: # The script now runs continuously
         # Get all files in the source folder
         all_files = os.listdir(src_dir)
         new_data_found = False
 
         for file in all_files:
             name, ext = os.path.splitext(file) # .split text to split the file as a more efficient way
-            
-        if ext not in acc_ext and not file.endswith(".ids"): 
+            if ext not in acc_ext and not file.endswith(".ids"): 
                 continue
 
             src_path = os.path.join(src_dir, file)
@@ -507,16 +560,15 @@ while True: # The script now runs continuously
                             log_sanitiser(new_lines, file) # Process ONLY the new lines
                             new_data_found = True
                         
-                        # Update \"bookmark\"
+                        # Update "bookmark"
                         file_progress[file] = f.tell() 
                         save_file_progress(file_progress)
 
                 except Exception as e:
                     print(f"Error reading {file}: {e}")
 
-        # Batch Timeout Logicstart
+        # Batch Timeout Logic
         time_since_last_batch = time.time() - last_batch_time
-        
         if len(suspicious_buffer) > 0 and time_since_last_batch >= MAX_WAIT_SECONDS:
             print(f"--- [TIMEOUT] Processing partial batch of {len(suspicious_buffer)} ---")
             process_batch(suspicious_buffer)

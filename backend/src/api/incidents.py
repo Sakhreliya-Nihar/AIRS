@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, Body
 from services.firestore import get_incidents, get_users, db 
 from pydantic import BaseModel, Field
-import firebase_admin.firestore as firestore 
+import firebase_admin.firestore as firestore
 from security.crypto import encrypt_payload
 
-router = APIRouter(tags=["API Routes"]) # Initialize the router and group these endpoints under "API Routes"
+router = APIRouter(tags=["API Routes"])  # Initialize the router and group these endpoints under "API Routes" 
 
 class NoteRequest(BaseModel):
     """Defines the expected JSON payload for adding a note to an incident."""
@@ -14,7 +14,6 @@ class AssignRequest(BaseModel):
     """Defines the expected JSON payload for assigning an incident to a user."""
     assigned_to: str = Field(..., max_length=100)
 
-@router.get("/api/incidents") 
 # API Endpoints
 
 @router.get("/api/incidents") # retrieves all incidents
@@ -34,11 +33,7 @@ def resolve_incident(doc_id: str):
 @router.post("/api/incidents/{doc_id}/notes") # Appends a note to a specific incident
 def add_note(doc_id: str, request: NoteRequest):
     try:
-
-
         encrypted_note = encrypt_payload(request.note)
-
-
         db.collection("incidents").document(doc_id).update({
             "user_notes": firestore.ArrayUnion([encrypted_note])
         })
@@ -46,19 +41,17 @@ def add_note(doc_id: str, request: NoteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.patch("/api/incidents/{doc_id}/mitigate")  # Appends a checked box to the incident
+@router.patch("/api/incidents/{doc_id}/mitigate") # Appends a checked box to the incident
 async def update_mitigation_progress(doc_id: str, completed_steps: list[int] = Body(..., embed=True)):
     """Saves the list of checked boxes (by index) to Firestore"""
     try:
         doc_ref = db.collection("incidents").document(doc_id)
-
         doc_ref.update({"completed_steps": completed_steps})
         return {"status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.patch("/api/incidents/{doc_id}/assign")  # Appends a user to an incident
+@router.patch("/api/incidents/{doc_id}/assign") # Appends a user to an incident
 def assign_incident(doc_id: str, request: AssignRequest):
     """Saves the assigned user to Firestore"""
     try:
@@ -77,41 +70,3 @@ def fetch_users():
         return get_users()
     except Exception as e:
        raise HTTPException(status_code=500, detail=str(e))
-    
-@router.get("/api/settings")
-def fetch_settings():
-    """Fetches the global configuration settings"""
-    try:
-        doc = db.collection("settings").document("global_config").get()
-        return doc.to_dict() if doc.exists else {}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.patch("/api/settings")
-def update_settings(payload: dict = Body(...)):
-    """Updates the global config (e.g., changing AI provider or API Key)"""
-    try:
-        # merge=True ensures I don't accidentally delete other settings
-        db.collection("settings").document("global_config").set(payload, merge=True)
-        return {"status": "success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@router.patch("/api/users/{uid}/ai-settings")
-def update_user_ai_settings(uid: str, payload: dict = Body(...)):
-    """Encrypts the AI API key and saves settings to the individual user's document."""
-    try:
-        provider = payload.get("llm_provider")
-        raw_key = payload.get("llm_api_key")
-        
-        update_data = {"llm_provider": provider}
-        
-        # Only encrypt and update the key if a new one was provided
-        if raw_key:
-            update_data["llm_api_key"] = encrypt_payload(raw_key)
-            
-        db.collection("users").document(uid).update(update_data)
-        return {"status": "success"}
-    except Exception as e:
-        print(f"Failed to update user AI settings: {e}")
-        raise HTTPException(status_code=500, detail="Failed to secure AI settings")
